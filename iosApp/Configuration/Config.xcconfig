@@ -1,0 +1,8 @@
+TEAM_ID=
+
+PRODUCT_NAME=NyaDeskPet
+PRODUCT_BUNDLE_IDENTIFIER=com.gameswu.nyadeskpet.NyaDeskPet$(TEAM_ID)
+
+// 版本号与 gradle.properties 保持一致
+CURRENT_PROJECT_VERSION=2
+MARKETING_VERSION=1.0.2
