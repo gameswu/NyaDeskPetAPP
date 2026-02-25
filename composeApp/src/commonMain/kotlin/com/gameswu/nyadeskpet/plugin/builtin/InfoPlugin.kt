@@ -23,7 +23,7 @@ class InfoPlugin : Plugin {
     override fun onLoad(context: PluginContext) {
         context.registerCommand("info", "显示项目信息") {
             buildString {
-                appendLine("🐱 NyaDeskPet")
+                appendLine("NyaDeskPet")
                 appendLine("版本: ${getAppVersion()}")
                 appendLine("作者: gameswu")
                 appendLine("仓库: https://github.com/gameswu/NyaDeskPetAPP")

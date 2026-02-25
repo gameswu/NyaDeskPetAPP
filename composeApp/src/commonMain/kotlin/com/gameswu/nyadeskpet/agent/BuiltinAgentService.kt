@@ -66,9 +66,17 @@ class BuiltinAgentService(
     private val ttsInstances = mutableMapOf<String, TTSEntry>()
     private var primaryTtsInstanceId: String = ""
 
+    // ==================== Skill Manager（对齐 handler.ts 技能系统）====================
+    val skillManager = SkillManager()
+
     // 供 UI 观测的实例列表
     private val _providerInstancesFlow = MutableStateFlow<List<ProviderInstanceInfo>>(emptyList())
     val providerInstancesFlow: StateFlow<List<ProviderInstanceInfo>> = _providerInstancesFlow.asStateFlow()
+
+    // 供 UI 观测的 TTS 实例列表
+    private val _ttsInstancesFlow = MutableStateFlow<List<TTSProviderInstanceConfig>>(emptyList())
+    val ttsInstancesFlow: StateFlow<List<TTSProviderInstanceConfig>> = _ttsInstancesFlow.asStateFlow()
+    val primaryTtsId: String get() = primaryTtsInstanceId
 
     init {
         ensureProvidersRegistered()
@@ -253,6 +261,56 @@ class BuiltinAgentService(
 
     private fun notifyInstancesChanged() {
         _providerInstancesFlow.value = getProviderInstances()
+        _ttsInstancesFlow.value = ttsInstances.values.map { it.config }
+    }
+
+    // ==================== TTS Provider 实例 CRUD ====================
+
+    /** 添加 TTS Provider 实例 */
+    fun addTtsInstance(instanceConfig: TTSProviderInstanceConfig): Boolean {
+        if (!TTSProviderRegistry.has(instanceConfig.providerId)) return false
+        ttsInstances[instanceConfig.instanceId] = TTSEntry(config = instanceConfig)
+        if (ttsInstances.size == 1) {
+            primaryTtsInstanceId = instanceConfig.instanceId
+        }
+        saveConfig()
+        notifyInstancesChanged()
+        return true
+    }
+
+    /** 移除 TTS Provider 实例 */
+    fun removeTtsInstance(instanceId: String): Boolean {
+        val entry = ttsInstances[instanceId] ?: return false
+        scope.launch { entry.provider?.terminate() }
+        ttsInstances.remove(instanceId)
+        if (primaryTtsInstanceId == instanceId) {
+            primaryTtsInstanceId = ttsInstances.keys.firstOrNull() ?: ""
+        }
+        saveConfig()
+        notifyInstancesChanged()
+        return true
+    }
+
+    /** 更新 TTS Provider 实例配置 */
+    fun updateTtsInstance(instanceId: String, newConfig: TTSProviderInstanceConfig): Boolean {
+        val entry = ttsInstances[instanceId] ?: return false
+        scope.launch { entry.provider?.terminate() }
+        entry.config = newConfig
+        entry.provider = null
+        entry.status = ProviderStatus.IDLE
+        entry.error = null
+        saveConfig()
+        notifyInstancesChanged()
+        return true
+    }
+
+    /** 设置主 TTS */
+    fun setPrimaryTts(instanceId: String): Boolean {
+        if (!ttsInstances.containsKey(instanceId)) return false
+        primaryTtsInstanceId = instanceId
+        saveConfig()
+        notifyInstancesChanged()
+        return true
     }
 
     // ==================== 持久化 ====================
@@ -334,7 +392,7 @@ class BuiltinAgentService(
         if (provider == null) {
             onEvent(AgentEvent.Dialogue(
                 DialogueEvent.Complete(DialogueData(
-                    text = "⚠️ 未配置 LLM Provider。请在 Agent 面板 → 概览 中添加并启用一个 LLM Provider。",
+                    text = "[警告] 未配置 LLM Provider。请在 Agent 面板 → 概览 中添加并启用一个 LLM Provider。",
                     duration = 8000L,
                 ))
             ))
@@ -361,7 +419,23 @@ class BuiltinAgentService(
             finalText
         }
 
-        conversationManager.addMessage(ChatMessage(role = "user", content = userContent))
+        // 构建 ChatMessage — 如果附件是图片，构建多模态消息
+        val userMessage = if (attachment != null && attachment.type == "image" && !attachment.data.isNullOrBlank()) {
+            ChatMessage(
+                role = "user",
+                content = userContent,
+                attachment = ChatMessageAttachment(
+                    type = "image",
+                    data = attachment.data,
+                    mimeType = attachment.source ?: "image/png",
+                    fileName = attachment.name,
+                ),
+            )
+        } else {
+            ChatMessage(role = "user", content = userContent)
+        }
+
+        conversationManager.addMessage(userMessage)
 
         val request = buildLLMRequest()
         val useStream = settingsRepo.current.llmStream ||
@@ -482,12 +556,12 @@ class BuiltinAgentService(
 
             // 超过最大迭代次数
             onEvent(AgentEvent.Dialogue(DialogueEvent.StreamEnd(
-                "⚠️ 工具调用超过最大迭代次数 ($maxToolIterations)，已停止。", null, 0
+                "[警告] 工具调用超过最大迭代次数 ($maxToolIterations)，已停止。", null, 0
             )))
         } catch (e: Exception) {
             val duration = com.gameswu.nyadeskpet.currentTimeMillis() - startTime
             onEvent(AgentEvent.Dialogue(
-                DialogueEvent.StreamEnd("❌ ${e.message ?: "未知错误"}", null, duration)
+                DialogueEvent.StreamEnd("[错误] ${e.message ?: "未知错误"}", null, duration)
             ))
         }
     }
@@ -556,14 +630,14 @@ class BuiltinAgentService(
             // 超过最大迭代次数
             onEvent(AgentEvent.Dialogue(
                 DialogueEvent.Complete(DialogueData(
-                    text = "⚠️ 工具调用超过最大迭代次数 ($maxToolIterations)，已停止。",
+                    text = "[警告] 工具调用超过最大迭代次数 ($maxToolIterations)，已停止。",
                     duration = 5000L,
                 ))
             ))
         } catch (e: Exception) {
             onEvent(AgentEvent.Dialogue(
                 DialogueEvent.Complete(DialogueData(
-                    text = "❌ ${e.message ?: "未知错误"}",
+                    text = "[错误] ${e.message ?: "未知错误"}",
                     duration = 5000L,
                 ))
             ))
@@ -648,7 +722,8 @@ class BuiltinAgentService(
      * 将插件工具定义转换为 LLM ToolDefinitionSchema 格式（OpenAI Function Calling）
      */
     private fun getToolSchemas(): List<ToolDefinitionSchema> {
-        return pluginManager.getAllTools().map { tool ->
+        // 插件工具
+        val pluginTools = pluginManager.getAllTools().map { tool ->
             ToolDefinitionSchema(
                 type = "function",
                 function = ToolFunctionDef(
@@ -658,6 +733,18 @@ class BuiltinAgentService(
                 )
             )
         }
+        // 技能工具（skill_ 前缀）
+        val skillTools = skillManager.toToolSchemas().map { tool ->
+            ToolDefinitionSchema(
+                type = "function",
+                function = ToolFunctionDef(
+                    name = tool.name,
+                    description = tool.description,
+                    parameters = tool.parameters,
+                )
+            )
+        }
+        return pluginTools + skillTools
     }
 
     /**
@@ -671,6 +758,47 @@ class BuiltinAgentService(
         val toolResultMessages = mutableListOf<ChatMessage>()
 
         for (tc in toolCalls) {
+            // 如果是技能调用，走 SkillManager
+            if (skillManager.isSkillToolCall(tc.name)) {
+                try {
+                    val arguments: JsonObject = try {
+                        Json.parseToJsonElement(tc.arguments).jsonObject
+                    } catch (_: Exception) {
+                        kotlinx.serialization.json.buildJsonObject {}
+                    }
+
+                    val skillCtx = SkillContext(
+                        callProvider = { request ->
+                            val provider = getPrimaryProvider()
+                                ?: throw IllegalStateException("No primary provider")
+                            provider.chat(request)
+                        },
+                        executeTool = { toolName, args -> pluginManager.executeTool(toolName, args) }
+                    )
+                    val result = skillManager.handleToolCall(tc.name, arguments, skillCtx)
+
+                    toolResultMessages.add(ChatMessage(
+                        role = "tool",
+                        content = result.result?.toString() ?: (result.error ?: "技能执行完成"),
+                        toolCallId = tc.id,
+                        toolName = tc.name,
+                    ))
+                    onEvent(AgentEvent.Command(CommandResponseData(
+                        command = "tool_status",
+                        success = result.success,
+                        text = "[技能] ${tc.name}: ${result.result?.toString()?.take(100) ?: result.error}"
+                    )))
+                } catch (e: Exception) {
+                    toolResultMessages.add(ChatMessage(
+                        role = "tool",
+                        content = "技能执行异常: ${e.message}",
+                        toolCallId = tc.id,
+                        toolName = tc.name,
+                    ))
+                }
+                continue
+            }
+
             // 查找工具定义，检查是否需要确认
             val toolDef = pluginManager.getAllTools().find { it.name == tc.name }
             val needConfirm = toolDef?.requireConfirm == true
@@ -680,7 +808,7 @@ class BuiltinAgentService(
                 onEvent(AgentEvent.Command(CommandResponseData(
                     command = "tool_status",
                     success = true,
-                    text = "⏳ 等待用户确认工具: ${tc.name}"
+                    text = "[等待确认] 工具: ${tc.name}"
                 )))
             }
 
@@ -709,7 +837,7 @@ class BuiltinAgentService(
                 onEvent(AgentEvent.Command(CommandResponseData(
                     command = "tool_status",
                     success = result.success,
-                    text = "🔧 ${tc.name}: $resultContent"
+                    text = "[工具] ${tc.name}: $resultContent"
                 )))
             } catch (e: Exception) {
                 toolResultMessages.add(ChatMessage(
@@ -845,8 +973,92 @@ class BuiltinAgentService(
         onEvent(AgentEvent.SyncCommand(SyncCommandData(actions = actions)))
     }
 
+    /**
+     * TTS 合成并流式推送音频事件。
+     * 对齐原项目 handler.ts synthesizeAndStream()：
+     * 1. 获取主 TTS Provider（无则静默跳过）
+     * 2. 延迟初始化 Provider
+     * 3. 合成 → audio_stream_start → audio_chunk → audio_stream_end
+     */
     private suspend fun handleTts(text: String, onEvent: suspend (AgentEvent) -> Unit) {
-        // TTS Provider 实例管理暂未完整实现，预留接口
+        if (primaryTtsInstanceId.isBlank()) return  // 没有 TTS 就静默跳过
+        val entry = ttsInstances[primaryTtsInstanceId] ?: return
+        if (!entry.config.enabled) return
+
+        try {
+            // 延迟初始化 TTS Provider
+            if (entry.provider == null) {
+                val provider = TTSProviderRegistry.create(entry.config.providerId, entry.config.config)
+                    ?: return
+                provider.initialize()
+                entry.provider = provider
+                entry.status = ProviderStatus.CONNECTED
+            }
+
+            val provider = entry.provider ?: return
+            val format = entry.config.config.extra["format"] ?: "mp3"
+            val mimeType = when (format) {
+                "wav" -> "audio/wav"
+                "pcm" -> "audio/pcm"
+                "opus" -> "audio/opus"
+                else -> "audio/mpeg"
+            }
+
+            // 发送 audio_stream_start
+            onEvent(AgentEvent.Audio(AudioEvent.Start(AudioStreamStartData(
+                mimeType = mimeType,
+                text = text,
+            ))))
+
+            // 合成（非流式，返回完整音频 base64）
+            val voiceId = entry.config.config.extra["voiceId"]
+            val response = provider.synthesize(TTSRequest(
+                text = text,
+                voiceId = voiceId,
+                format = format,
+            ))
+
+            // 发送音频数据（单个 chunk）
+            onEvent(AgentEvent.Audio(AudioEvent.Chunk(AudioChunkData(
+                chunk = response.audioBase64,
+                sequence = 0,
+            ))))
+
+            // 发送 audio_stream_end
+            onEvent(AgentEvent.Audio(AudioEvent.End))
+
+            println("[BuiltinAgentService] TTS 合成完成")
+        } catch (e: Exception) {
+            println("[BuiltinAgentService] TTS 合成失败（非致命）: ${e.message}")
+            // 已发送 start 则需发送 end 通知前端清理
+            try { onEvent(AgentEvent.Audio(AudioEvent.End)) } catch (_: Exception) {}
+        }
+    }
+
+    /** 初始化 TTS Provider 实例 */
+    suspend fun initializeTtsInstance(instanceId: String): TestResult {
+        val entry = ttsInstances[instanceId]
+            ?: return TestResult(false, "TTS 实例不存在")
+        return try {
+            entry.provider?.terminate()
+            entry.status = ProviderStatus.CONNECTING
+            entry.error = null
+            notifyInstancesChanged()
+
+            val provider = TTSProviderRegistry.create(entry.config.providerId, entry.config.config)
+                ?: throw Exception("无法创建 TTS Provider: ${entry.config.providerId}")
+            provider.initialize()
+            entry.provider = provider
+            entry.status = ProviderStatus.CONNECTED
+            entry.error = null
+            notifyInstancesChanged()
+            TestResult(true)
+        } catch (e: Exception) {
+            entry.status = ProviderStatus.ERROR
+            entry.error = e.message
+            notifyInstancesChanged()
+            TestResult(false, e.message)
+        }
     }
 
     // ==================== 对话管理（委托 ConversationManager）====================
@@ -887,6 +1099,8 @@ class BuiltinAgentService(
         pluginManager.registerPlugin(com.gameswu.nyadeskpet.plugin.builtin.WebToolsPlugin())
         pluginManager.registerPlugin(com.gameswu.nyadeskpet.plugin.builtin.ImageGenPlugin())
         pluginManager.registerPlugin(com.gameswu.nyadeskpet.plugin.builtin.InputCollectorPlugin())
+        pluginManager.registerPlugin(com.gameswu.nyadeskpet.plugin.builtin.ImageTranscriberPlugin())
+        pluginManager.registerPlugin(com.gameswu.nyadeskpet.plugin.builtin.PlanningPlugin())
     }
 
     /**
@@ -1013,6 +1227,11 @@ class BuiltinAgentService(
                 val provider = entry.provider
                     ?: throw IllegalStateException("Provider not initialized: $targetId")
                 return provider.chat(request)
+            }
+
+            override fun getProviderConfig(instanceId: String): ProviderConfig? {
+                val targetId = if (instanceId == "primary") primaryInstanceId else instanceId
+                return providerInstances[targetId]?.config?.config
             }
 
             override fun getAllCommandDefinitions(): List<Pair<String, String>> {

@@ -82,6 +82,21 @@ data class ChatMessage(
     val toolName: String? = null,
     val images: List<ChatMessageImage>? = null,
     val isCommand: Boolean = false,
+    /** 多模态附件（图片/文件）— 对齐原项目 ChatMessage.attachment */
+    val attachment: ChatMessageAttachment? = null,
+)
+
+/**
+ * 消息附件（多模态）
+ * 对应原项目 ChatMessage.attachment
+ */
+@Serializable
+data class ChatMessageAttachment(
+    val type: String,              // "image" | "file"
+    val data: String? = null,      // Base64 编码数据
+    val url: String? = null,       // URL 引用
+    val mimeType: String? = null,  // MIME 类型
+    val fileName: String? = null,  // 文件名
 )
 
 @Serializable

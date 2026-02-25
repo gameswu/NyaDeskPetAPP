@@ -18,7 +18,12 @@ import androidx.core.content.ContextCompat
 /**
  * Android 原生文件选择器实现。
  * 使用 Intent.ACTION_OPEN_DOCUMENT 打开系统文件管理器。
- * 在 Android 11+ 自动请求 MANAGE_EXTERNAL_STORAGE 权限以访问更多目录。
+ *
+ * 权限模型：
+ * - Android 10 及以下：READ/WRITE_EXTERNAL_STORAGE + requestLegacyExternalStorage
+ * - Android 11-12 (API 30-32)：MANAGE_EXTERNAL_STORAGE（引导到设置页）或 READ_EXTERNAL_STORAGE
+ * - Android 13+ (API 33+)：READ_MEDIA_IMAGES / READ_MEDIA_VIDEO / READ_MEDIA_AUDIO +
+ *                           MANAGE_EXTERNAL_STORAGE（非媒体文件访问）
  */
 @Composable
 actual fun rememberFilePickerLauncher(
@@ -27,7 +32,7 @@ actual fun rememberFilePickerLauncher(
 ): () -> Unit {
     val context = LocalContext.current
 
-    // 文件选择器 launcher
+    // SAF 文件选择器 launcher
     val documentLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri: Uri? ->
@@ -61,20 +66,29 @@ actual fun rememberFilePickerLauncher(
         }
     }
 
-    // READ_EXTERNAL_STORAGE 权限请求 launcher（Android 12 及以下）
+    // 权限回调后打开文件选择器的标志
     var pendingLaunchAfterPermission by remember { mutableStateOf(false) }
+
+    // Android 12 及以下：READ_EXTERNAL_STORAGE 权限请求
     val readPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
-    ) { granted ->
-        // 无论是否授权，都打开文件选择器（SAF 本身不依赖存储权限）
+    ) { _ ->
+        // 无论是否授权，SAF 本身不需要存储权限，照样打开
         pendingLaunchAfterPermission = true
     }
 
-    // MANAGE_EXTERNAL_STORAGE 设置页返回后的处理
+    // Android 13+：批量请求 READ_MEDIA_* 权限
+    val mediaPermissionsLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { _ ->
+        // 请求完成后打开文件选择器
+        pendingLaunchAfterPermission = true
+    }
+
+    // MANAGE_EXTERNAL_STORAGE 设置页返回后
     val manageStorageLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) {
-        // 从设置页返回后直接打开文件选择器
         pendingLaunchAfterPermission = true
     }
 
@@ -87,18 +101,32 @@ actual fun rememberFilePickerLauncher(
     }
 
     return {
-        if (hasStoragePermission(context)) {
-            // 已有权限，直接打开
+        if (hasFullStoragePermission(context)) {
+            // 已有完整存储权限，直接打开
             documentLauncher.launch(mimeTypes.toTypedArray())
         } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            // Android 11+：引导用户到"所有文件访问"设置页
-            try {
-                val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
-                    data = Uri.parse("package:${context.packageName}")
+            // Android 11+：
+            // 1) 先请求媒体权限（Android 13+ 需要）
+            // 2) 然后引导到 MANAGE_EXTERNAL_STORAGE 设置页（访问非媒体文件）
+            if (!Environment.isExternalStorageManager()) {
+                try {
+                    val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION).apply {
+                        data = Uri.parse("package:${context.packageName}")
+                    }
+                    manageStorageLauncher.launch(intent)
+                } catch (_: Exception) {
+                    // 某些设备不支持，回退到通用设置页
+                    try {
+                        val intent = Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
+                        manageStorageLauncher.launch(intent)
+                    } catch (_: Exception) {
+                        documentLauncher.launch(mimeTypes.toTypedArray())
+                    }
                 }
-                manageStorageLauncher.launch(intent)
-            } catch (_: Exception) {
-                // 某些设备不支持该 Intent，直接打开文件选择器
+            } else if (Build.VERSION.SDK_INT >= 33 && !hasMediaPermissions(context)) {
+                // 有 MANAGE_EXTERNAL_STORAGE 但缺 READ_MEDIA_* 权限
+                mediaPermissionsLauncher.launch(getMediaPermissions())
+            } else {
                 documentLauncher.launch(mimeTypes.toTypedArray())
             }
         } else {
@@ -124,13 +152,12 @@ private fun getFileName(context: Context, uri: Uri): String? {
 }
 
 /**
- * 检查应用是否拥有存储访问权限。
- * Android 11+: 检查 MANAGE_EXTERNAL_STORAGE
- * Android 10-: 检查 READ_EXTERNAL_STORAGE
+ * 检查是否拥有完整存储访问权限。
  */
-private fun hasStoragePermission(context: Context): Boolean {
+private fun hasFullStoragePermission(context: Context): Boolean {
     return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-        Environment.isExternalStorageManager()
+        Environment.isExternalStorageManager() &&
+            (Build.VERSION.SDK_INT < 33 || hasMediaPermissions(context))
     } else {
         ContextCompat.checkSelfPermission(
             context,
@@ -138,3 +165,33 @@ private fun hasStoragePermission(context: Context): Boolean {
         ) == PackageManager.PERMISSION_GRANTED
     }
 }
+
+/**
+ * 检查 Android 13+ 媒体权限是否已全部授予。
+ */
+private fun hasMediaPermissions(context: Context): Boolean {
+    if (Build.VERSION.SDK_INT < 33) return true
+    return getMediaPermissions().all {
+        ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
+    }
+}
+
+/**
+ * 获取 Android 13+ 需要的细分媒体权限列表。
+ */
+private fun getMediaPermissions(): Array<String> {
+    return if (Build.VERSION.SDK_INT >= 33) {
+        arrayOf(
+            Manifest.permission.READ_MEDIA_IMAGES,
+            Manifest.permission.READ_MEDIA_VIDEO,
+            Manifest.permission.READ_MEDIA_AUDIO,
+        )
+    } else {
+        emptyArray()
+    }
+}
+
+/**
+ * 检查是否拥有基本存储权限（供外部模块调用）。
+ */
+fun hasStoragePermission(context: Context): Boolean = hasFullStoragePermission(context)

@@ -191,6 +191,14 @@ interface PluginContext {
     /** 调用指定 Provider（用于压缩、图像生成等场景） */
     suspend fun callProvider(instanceId: String, request: LLMRequest): LLMResponse
 
+    /**
+     * 获取 Provider 的底层配置（apiKey, baseUrl 等）。
+     * 对齐原项目 ctx.getProviderConfig(instanceId)。
+     * 插件可用此获取 Provider 的 API 密钥和端点，用于图像生成等直接 API 调用。
+     * @param instanceId Provider 实例 ID，"primary" 表示主 LLM Provider
+     */
+    fun getProviderConfig(instanceId: String): com.gameswu.nyadeskpet.agent.provider.ProviderConfig?
+
     // ==================== 工具/命令查询 ====================
 
     /** 获取所有已注册的命令定义 — 返回 List<Pair<name, description>> */

@@ -1,5 +1,6 @@
 package com.gameswu.nyadeskpet.data
 
+import com.gameswu.nyadeskpet.agent.mcp.McpServerConfig
 import com.gameswu.nyadeskpet.agent.provider.ProviderInstanceConfig
 import com.gameswu.nyadeskpet.agent.provider.TTSProviderInstanceConfig
 import kotlinx.coroutines.flow.*
@@ -46,10 +47,18 @@ data class AppSettings(
     val primaryTtsInstanceId: String = "",
 
     // 麦克风 / ASR
+    /** ASR 模式: "system" = 系统识别器 | "whisper" = Whisper API */
+    val asrMode: String = "system",
     val micBackgroundMode: Boolean = false,
     val micVolumeThreshold: Int = 30,
     val micAutoSend: Boolean = true,
-    val asrModel: String = "sense-voice-small",
+    val asrModel: String = "whisper-1",
+    /** Whisper API 密钥（留空则复用主 LLM Provider 的 API Key） */
+    val asrApiKey: String = "",
+    /** Whisper API Base URL */
+    val asrBaseUrl: String = "https://api.openai.com/v1",
+    /** Whisper 识别语言代码（留空 = 自动检测） */
+    val asrLanguage: String = "",
 
     // 日志
     val logEnabled: Boolean = false,
@@ -59,6 +68,9 @@ data class AppSettings(
     // 其他
     val updateSource: String = "https://github.com/gameswu/NyaDeskPetAPP",
     val autoLaunch: Boolean = false,
+
+    // ===== MCP 服务器 =====
+    val mcpServers: List<McpServerConfig> = emptyList(),
 )
 
 @Serializable

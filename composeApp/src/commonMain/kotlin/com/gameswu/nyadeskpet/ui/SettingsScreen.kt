@@ -95,7 +95,7 @@ fun SettingsScreen() {
                         repo.resetToDefaults()
                         coroutineScope.launch {
                             snackbarHostState.showSnackbar(
-                                message = "✅ 已恢复默认设置",
+                                message = "已恢复默认设置",
                                 duration = SnackbarDuration.Short,
                             )
                         }
@@ -105,7 +105,7 @@ fun SettingsScreen() {
                     Button(onClick = {
                         coroutineScope.launch {
                             snackbarHostState.showSnackbar(
-                                message = "✅ 设置已保存",
+                                message = "设置已保存",
                                 duration = SnackbarDuration.Short,
                             )
                         }
@@ -301,14 +301,79 @@ private fun ConnectionSection(
         colors = SliderDefaults.colors(thumbColor = Color(0xFF4CAF50), activeTrackColor = Color(0xFF4CAF50))
     )
 
-    // 麦克风 — 对齐原项目 microphone section
+    // 麦克风 / ASR — 对齐原项目 microphone section + Whisper API 扩展
     SectionHeader(I18nManager.t("settings.microphone"))
-    OutlinedTextField(
-        value = settings.asrModel,
-        onValueChange = { repo.update { s -> s.copy(asrModel = it) } },
-        label = { Text(I18nManager.t("settings.asrModel")) },
-        modifier = Modifier.fillMaxWidth(),
-        singleLine = true
+
+    // ASR 模式下拉框
+    val asrModeOptions = listOf(
+        "system" to "系统识别器",
+        "whisper" to "Whisper API",
+    )
+    var asrModeExpanded by remember { mutableStateOf(false) }
+    ExposedDropdownMenuBox(expanded = asrModeExpanded, onExpandedChange = { asrModeExpanded = it }) {
+        OutlinedTextField(
+            value = asrModeOptions.firstOrNull { it.first == settings.asrMode }?.second ?: settings.asrMode,
+            onValueChange = {},
+            readOnly = true,
+            label = { Text("ASR 模式") },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(asrModeExpanded) },
+            modifier = Modifier.fillMaxWidth().menuAnchor(),
+        )
+        ExposedDropdownMenu(expanded = asrModeExpanded, onDismissRequest = { asrModeExpanded = false }) {
+            asrModeOptions.forEach { (value, label) ->
+                DropdownMenuItem(
+                    text = { Text(label) },
+                    onClick = {
+                        repo.update { it.copy(asrMode = value) }
+                        asrModeExpanded = false
+                    },
+                )
+            }
+        }
+    }
+
+    // Whisper API 模式专用设置
+    if (settings.asrMode == "whisper") {
+        Spacer(modifier = Modifier.height(8.dp))
+        OutlinedTextField(
+            value = settings.asrApiKey,
+            onValueChange = { repo.update { s -> s.copy(asrApiKey = it) } },
+            label = { Text("Whisper API Key") },
+            placeholder = { Text("留空则复用主 LLM 的 API Key") },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true
+        )
+        OutlinedTextField(
+            value = settings.asrBaseUrl,
+            onValueChange = { repo.update { s -> s.copy(asrBaseUrl = it) } },
+            label = { Text("API Base URL") },
+            placeholder = { Text("https://api.openai.com/v1") },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true
+        )
+        OutlinedTextField(
+            value = settings.asrModel,
+            onValueChange = { repo.update { s -> s.copy(asrModel = it) } },
+            label = { Text(I18nManager.t("settings.asrModel")) },
+            placeholder = { Text("whisper-1") },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true
+        )
+        OutlinedTextField(
+            value = settings.asrLanguage,
+            onValueChange = { repo.update { s -> s.copy(asrLanguage = it) } },
+            label = { Text("识别语言") },
+            placeholder = { Text("留空 = 自动检测，如 zh, en, ja") },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true
+        )
+    }
+
+    Spacer(modifier = Modifier.height(8.dp))
+    SettingsToggle(
+        label = I18nManager.t("settings.micAutoSend"),
+        checked = settings.micAutoSend,
+        onCheckedChange = { repo.update { s -> s.copy(micAutoSend = it) } }
     )
     SettingsToggle(
         label = I18nManager.t("settings.micBackgroundMode"),
@@ -321,11 +386,6 @@ private fun ConnectionSection(
         onValueChange = { repo.update { s -> s.copy(micVolumeThreshold = it.toInt()) } },
         valueRange = 0f..100f,
         colors = SliderDefaults.colors(thumbColor = Color(0xFF4CAF50), activeTrackColor = Color(0xFF4CAF50))
-    )
-    SettingsToggle(
-        label = I18nManager.t("settings.micAutoSend"),
-        checked = settings.micAutoSend,
-        onCheckedChange = { repo.update { s -> s.copy(micAutoSend = it) } }
     )
 }
 
@@ -342,13 +402,25 @@ private fun DisplaySection(
         "dark" to I18nManager.t("settings.themeDark"),
         "system" to I18nManager.t("settings.themeSystem"),
     )
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        themeOptions.forEach { (value, label) ->
-            FilterChip(
-                selected = settings.theme == value,
-                onClick = { repo.update { it.copy(theme = value) } },
-                label = { Text(label) }
-            )
+    var themeExpanded by remember { mutableStateOf(false) }
+    ExposedDropdownMenuBox(expanded = themeExpanded, onExpandedChange = { themeExpanded = it }) {
+        OutlinedTextField(
+            value = themeOptions.firstOrNull { it.first == settings.theme }?.second ?: settings.theme,
+            onValueChange = {},
+            readOnly = true,
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(themeExpanded) },
+            modifier = Modifier.fillMaxWidth().menuAnchor(),
+        )
+        ExposedDropdownMenu(expanded = themeExpanded, onDismissRequest = { themeExpanded = false }) {
+            themeOptions.forEach { (value, label) ->
+                DropdownMenuItem(
+                    text = { Text(label) },
+                    onClick = {
+                        repo.update { it.copy(theme = value) }
+                        themeExpanded = false
+                    },
+                )
+            }
         }
     }
 
@@ -696,6 +768,10 @@ private fun AboutSection(repo: SettingsRepository) {
             Text(I18nManager.t("settings.donate"), color = MaterialTheme.colorScheme.primary)
         }
     }
+
+    // 存储权限管理（Android 显示，iOS 空实现）
+    Spacer(Modifier.height(4.dp))
+    StoragePermissionSection()
 }
 
 /** 格式化文件大小为人类可读字符串 */

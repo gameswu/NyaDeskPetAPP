@@ -5,6 +5,7 @@ import com.gameswu.nyadeskpet.plugin.api.ToolDefinition
 import com.gameswu.nyadeskpet.plugin.api.ToolProvider
 import com.gameswu.nyadeskpet.plugin.api.ToolResult
 import io.ktor.client.*
+import io.ktor.client.plugins.*
 import io.ktor.client.request.*
 import io.ktor.client.statement.*
 import io.ktor.http.*
@@ -208,12 +209,9 @@ class ImageGenPlugin : Plugin, ToolProvider {
 
     /**
      * 调用图像生成 API（OpenAI 兼容格式）。
-     *
-     * 注意：此方法需要从 Provider 配置中获取 apiKey 和 baseUrl，
-     * 但当前 PluginContext 不暴露这些信息。因此这里使用一个简化实现：
-     * 返回提示信息让用户知道需要配置独立的图像生成服务。
-     *
-     * 在完整实现中，应扩展 PluginContext 以支持 getProviderConfig()。
+     * 对齐原项目 image-gen/main.js _callImageAPI：
+     * 通过 PluginContext.getProviderConfig() 获取 apiKey/baseUrl，
+     * 直接调用 /images/generations 端点。
      */
     private suspend fun callImageAPI(
         providerInfo: ProviderBriefInfo,
@@ -222,26 +220,73 @@ class ImageGenPlugin : Plugin, ToolProvider {
         size: String,
         quality: String,
     ): ImageAPIResult {
-        // 简化实现：由于 PluginContext 不暴露 apiKey/baseUrl，
-        // 返回提示信息说明图像生成功能需要进一步配置
-        return ImageAPIResult(
-            success = false,
-            error = "图像生成功能需要直接配置 API 访问。请确保 Provider '${providerInfo.displayName}' 支持 /images/generations 端点。" +
-                    "当前 KMP 版本暂不支持直接调用图像生成 API，请使用原 Electron 版本或等待后续更新。",
-        )
+        val context = ctx ?: return ImageAPIResult(success = false, error = "插件未初始化")
 
-        // TODO: 完整实现需要:
-        // 1. 扩展 PluginContext 添加 getProviderConfig(instanceId) 方法
-        // 2. 从中获取 apiKey 和 baseUrl
-        // 3. 调用 ${baseUrl}/images/generations API
-        // 示例请求体:
-        // {
-        //   "model": imageModel,
-        //   "prompt": prompt,
-        //   "size": size,
-        //   "quality": quality,
-        //   "n": 1,
-        //   "response_format": "b64_json"
-        // }
+        // 通过 PluginContext 获取 Provider 底层配置
+        val providerConfig = context.getProviderConfig(providerInstanceId)
+            ?: return ImageAPIResult(
+                success = false,
+                error = "找不到 Provider 实例 \"$providerInstanceId\" 的配置",
+            )
+
+        val apiKey = providerConfig.apiKey
+        if (apiKey.isNullOrBlank()) {
+            return ImageAPIResult(
+                success = false,
+                error = "Provider \"${providerInfo.displayName}\" 未配置 API Key",
+            )
+        }
+
+        val baseUrl = (providerConfig.baseUrl ?: "https://api.openai.com/v1").trimEnd('/')
+        val apiUrl = "$baseUrl/images/generations"
+
+        return try {
+            val requestBody = buildJsonObject {
+                put("model", JsonPrimitive(imageModel))
+                put("prompt", JsonPrimitive(prompt))
+                put("size", JsonPrimitive(size))
+                put("quality", JsonPrimitive(quality))
+                put("n", JsonPrimitive(1))
+                put("response_format", JsonPrimitive("b64_json"))
+            }.toString()
+
+            val response = httpClient.post(apiUrl) {
+                header("Authorization", "Bearer $apiKey")
+                contentType(io.ktor.http.ContentType.Application.Json)
+                setBody(requestBody)
+                timeout {
+                    requestTimeoutMillis = REQUEST_TIMEOUT
+                    connectTimeoutMillis = 30000
+                }
+            }
+
+            val bodyText = response.bodyAsText()
+
+            if (response.status.value != 200) {
+                val errorMsg = try {
+                    val errorJson = kotlinx.serialization.json.Json.parseToJsonElement(bodyText).jsonObject
+                    errorJson["error"]?.jsonObject?.get("message")?.jsonPrimitive?.contentOrNull
+                        ?: "HTTP ${response.status.value}"
+                } catch (_: Exception) {
+                    "HTTP ${response.status.value}: $bodyText"
+                }
+                return ImageAPIResult(success = false, error = errorMsg)
+            }
+
+            val responseJson = kotlinx.serialization.json.Json.parseToJsonElement(bodyText).jsonObject
+            val data = responseJson["data"]?.jsonArray
+            if (data.isNullOrEmpty()) {
+                return ImageAPIResult(success = false, error = "未返回图片数据")
+            }
+
+            val imageData = data[0].jsonObject
+            ImageAPIResult(
+                success = true,
+                b64Data = imageData["b64_json"]?.jsonPrimitive?.contentOrNull,
+                revisedPrompt = imageData["revised_prompt"]?.jsonPrimitive?.contentOrNull,
+            )
+        } catch (e: Exception) {
+            ImageAPIResult(success = false, error = "请求失败: ${e.message}")
+        }
     }
 }

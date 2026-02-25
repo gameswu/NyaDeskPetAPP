@@ -13,6 +13,7 @@ import com.gameswu.nyadeskpet.data.SettingsRepository
 import com.gameswu.nyadeskpet.i18n.I18nManager
 import com.gameswu.nyadeskpet.ui.PetScreen
 import com.gameswu.nyadeskpet.ui.SettingsScreen
+import com.gameswu.nyadeskpet.ui.StoragePermissionRequest
 import com.gameswu.nyadeskpet.ui.agent.AgentPanelScreen
 import com.gameswu.nyadeskpet.ui.chat.ChatScreen
 import com.gameswu.nyadeskpet.ui.theme.AppTheme
@@ -29,6 +30,9 @@ fun App() {
     }
 
     AppTheme {
+        // 启动时主动请求存储权限（Android 实际弹窗, iOS 空实现）
+        StoragePermissionRequest()
+
         Scaffold(
             bottomBar = {
                 NavigationBar {

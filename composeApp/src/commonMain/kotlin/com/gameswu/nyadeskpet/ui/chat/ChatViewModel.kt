@@ -95,7 +95,7 @@ class ChatViewModel(
         viewModelScope.launch {
             agentClient.commandResponses.collect { resp ->
                 val prefix = "/${resp.command}"
-                val text = if (resp.success) "$prefix\n${resp.text ?: ""}" else "$prefix\n❌ ${resp.error ?: "Failed"}"
+                val text = if (resp.success) "$prefix\n${resp.text ?: ""}" else "$prefix\n[错误] ${resp.error ?: "Failed"}"
                 appendMessage(ChatMessage(text = text, isUser = false))
             }
         }

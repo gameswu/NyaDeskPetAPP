@@ -161,7 +161,7 @@ class FishAudioProvider(config: ProviderConfig) : TTSProvider(config) {
                 for (m in selfData.items) {
                     voices.add(VoiceInfo(
                         id = m.id,
-                        name = "${m.title} ⭐",
+                        name = "${m.title} [★]",
                         description = m.description,
                         language = m.languages?.joinToString(", "),
                     ))

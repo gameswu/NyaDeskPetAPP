@@ -20,8 +20,8 @@ import com.gameswu.nyadeskpet.agent.Attachment
 import com.gameswu.nyadeskpet.data.SettingsRepository
 import com.gameswu.nyadeskpet.i18n.I18nManager
 import com.gameswu.nyadeskpet.ui.rememberCameraCaptureLauncher
+import com.gameswu.nyadeskpet.ui.rememberDualModeVoiceInput
 import com.gameswu.nyadeskpet.ui.rememberFilePickerLauncher
-import com.gameswu.nyadeskpet.ui.rememberVoiceInput
 import org.koin.compose.koinInject
 import org.koin.compose.viewmodel.koinViewModel
 import kotlin.io.encoding.Base64
@@ -35,8 +35,20 @@ fun ChatScreen(viewModel: ChatViewModel = koinViewModel()) {
     val settingsRepo: SettingsRepository = koinInject()
     val settings by settingsRepo.settings.collectAsState()
 
-    // 语音输入
-    val voiceInput = rememberVoiceInput(
+    // 语音输入 — 双模式（系统识别器 / Whisper API）
+    // 如果 ASR API Key 为空，尝试复用主 LLM Provider 的 API Key
+    val effectiveAsrApiKey = settings.asrApiKey.ifBlank {
+        val primaryId = settings.primaryLlmInstanceId
+        settings.llmProviderInstances
+            .firstOrNull { it.instanceId == primaryId }
+            ?.config?.apiKey ?: ""
+    }
+    val voiceInput = rememberDualModeVoiceInput(
+        asrMode = settings.asrMode,
+        asrApiKey = effectiveAsrApiKey,
+        asrBaseUrl = settings.asrBaseUrl,
+        asrModel = settings.asrModel,
+        asrLanguage = settings.asrLanguage,
         onResult = { text ->
             viewModel.onInputChanged(text)
             if (settings.micAutoSend && text.isNotBlank()) {

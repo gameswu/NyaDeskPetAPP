@@ -26,6 +26,10 @@ class PluginManager(private val configStorage: PluginConfigStorage) {
     private val _panelPlugins = MutableStateFlow<Map<String, PanelPlugin>>(emptyMap())
     val panelPlugins: StateFlow<Map<String, PanelPlugin>> = _panelPlugins.asStateFlow()
 
+    // ---------- 工具级别启用/禁用 ----------
+    private val _toolEnabledOverrides = mutableMapOf<String, Boolean>()
+    private val _toolEnabledVersion = MutableStateFlow(0) // 用于触发 UI 重组
+
     // 命令系统 — 追踪来源插件
     private val _commandHandlers = mutableMapOf<String, suspend (String) -> String>()
     private val _commandDescriptions = mutableMapOf<String, String>()
@@ -94,15 +98,47 @@ class PluginManager(private val configStorage: PluginConfigStorage) {
         contextFactory?.invoke(id)?.let { ctx -> plugin.onLoad(ctx) }
     }
 
+    // ---------- 外部 ToolProvider 注册（MCP 等）----------
+
+    /**
+     * 注册外部 ToolProvider（非 Plugin 子类，如 McpToolProvider）。
+     * 使其工具加入 getAllTools() → getToolSchemas() → LLM 工具列表。
+     */
+    fun registerToolProvider(provider: ToolProvider) {
+        _toolProviders.value = _toolProviders.value + (provider.providerId to provider)
+    }
+
+    /**
+     * 注销外部 ToolProvider（MCP 服务器断连时调用）。
+     */
+    fun unregisterToolProvider(providerId: String) {
+        _toolProviders.value = _toolProviders.value - providerId
+    }
+
     // ---------- 工具查询 ----------
+
+    /** 工具启用/禁用变更版本号（UI 通过 collectAsState 观察此值来刷新） */
+    val toolEnabledVersion: StateFlow<Int> = _toolEnabledVersion.asStateFlow()
+
+    /** 设置单个工具的启用状态 */
+    fun setToolEnabled(toolName: String, enabled: Boolean) {
+        _toolEnabledOverrides[toolName] = enabled
+        _toolEnabledVersion.value++
+    }
+
+    /** 查询单个工具是否被启用 */
+    fun isToolEnabled(toolName: String): Boolean {
+        return _toolEnabledOverrides[toolName] != false
+    }
 
     fun getAllTools(): List<ToolDefinition> {
         return _toolProviders.value.values
             .filter { (it as? Plugin)?.enabled != false }
             .flatMap { it.getTools() }
+            .filter { _toolEnabledOverrides[it.name] != false }
     }
 
-    /** 获取所有工具（含来源信息） */
+    /** 获取所有工具（含来源信息），不过滤禁用工具，供 UI 展示 */
     fun getAllToolsWithSource(): List<Pair<ToolDefinition, String>> {
         return _toolProviders.value.entries
             .filter { (it.value as? Plugin)?.enabled != false }
@@ -113,7 +149,13 @@ class PluginManager(private val configStorage: PluginConfigStorage) {
     }
 
     suspend fun executeTool(name: String, arguments: kotlinx.serialization.json.JsonObject): ToolResult {
+        // 检查工具级别是否禁用
+        if (_toolEnabledOverrides[name] == false) {
+            return ToolResult(success = false, error = "Tool disabled: $name")
+        }
         for (provider in _toolProviders.value.values) {
+            // 与 getAllTools() 使用相同的 enabled 过滤逻辑
+            if ((provider as? Plugin)?.enabled == false) continue
             val tool = provider.getTools().find { it.name == name }
             if (tool != null) {
                 return provider.executeTool(name, arguments)

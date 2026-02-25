@@ -13,6 +13,8 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import com.gameswu.nyadeskpet.agent.*
+import com.gameswu.nyadeskpet.agent.mcp.McpManager
+import com.gameswu.nyadeskpet.agent.mcp.McpServerConfig
 import com.gameswu.nyadeskpet.agent.provider.*
 import com.gameswu.nyadeskpet.data.SettingsRepository
 import com.gameswu.nyadeskpet.i18n.I18nManager
@@ -192,20 +194,84 @@ private fun OverviewTab(connState: ConnectionState, agentClient: AgentClient, sn
 
         // ===== TTS Provider 区 =====
         SectionHeader(I18nManager.t("agent.ttsProviders"), Icons.Default.VolumeUp)
+        var showAddTtsDialog by remember { mutableStateOf(false) }
+        val ttsInstances by builtinAgent.ttsInstancesFlow.collectAsState()
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(16.dp)) {
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                    FilledTonalButton(onClick = { /* TODO: TTS provider dialog */ }) {
+                    FilledTonalButton(onClick = { showAddTtsDialog = true }) {
                         Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(4.dp))
                         Text(I18nManager.t("agent.addTts"))
                     }
                 }
                 Spacer(Modifier.height(8.dp))
-                if (settings.ttsProviderInstances.isEmpty()) {
+                if (ttsInstances.isEmpty()) {
                     EmptyHint(I18nManager.t("agent.noProviders"))
+                } else {
+                    ttsInstances.forEach { cfg ->
+                        val isPrimary = cfg.instanceId == builtinAgent.primaryTtsId
+                        Card(
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                            colors = CardDefaults.cardColors(
+                                containerColor = if (isPrimary)
+                                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
+                                else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                            ),
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(12.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        Text(cfg.displayName, style = MaterialTheme.typography.titleSmall)
+                                        if (isPrimary) {
+                                            AssistChip(onClick = {}, label = { Text("主要", style = MaterialTheme.typography.labelSmall) })
+                                        }
+                                    }
+                                    Text(
+                                        TTSProviderRegistry.get(cfg.providerId)?.name ?: cfg.providerId,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                                Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                                    if (!isPrimary) {
+                                        IconButton(onClick = { builtinAgent.setPrimaryTts(cfg.instanceId) }, modifier = Modifier.size(32.dp)) {
+                                            Icon(Icons.Default.Star, contentDescription = "设为主要", modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        }
+                                    }
+                                    IconButton(
+                                        onClick = { builtinAgent.removeTtsInstance(cfg.instanceId) },
+                                        modifier = Modifier.size(32.dp),
+                                    ) {
+                                        Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.error.copy(alpha = 0.7f))
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
+        }
+
+        // ===== 添加 TTS Provider 对话框 =====
+        if (showAddTtsDialog) {
+            AddTtsProviderDialog(
+                onDismiss = { showAddTtsDialog = false },
+                onSave = { ttsConfig ->
+                    builtinAgent.addTtsInstance(ttsConfig)
+                    showAddTtsDialog = false
+                    coroutineScope.launch {
+                        snackbarHostState.showSnackbar(
+                            message = "TTS \"${ttsConfig.displayName}\" 已添加",
+                            duration = SnackbarDuration.Short,
+                        )
+                    }
+                },
+            )
         }
     }
 
@@ -218,7 +284,7 @@ private fun OverviewTab(connState: ConnectionState, agentClient: AgentClient, sn
                 showAddDialog = false
                 coroutineScope.launch {
                     snackbarHostState.showSnackbar(
-                        message = "✅ Provider \"${instanceConfig.displayName}\" 已添加",
+                        message = "Provider \"${instanceConfig.displayName}\" 已添加",
                         duration = SnackbarDuration.Short,
                     )
                     // 如果标记了 enabled，自动初始化
@@ -240,7 +306,7 @@ private fun OverviewTab(connState: ConnectionState, agentClient: AgentClient, sn
                 editingInstance = null
                 coroutineScope.launch {
                     snackbarHostState.showSnackbar(
-                        message = "✅ Provider \"${newConfig.displayName}\" 已更新",
+                        message = "Provider \"${newConfig.displayName}\" 已更新",
                         duration = SnackbarDuration.Short,
                     )
                 }
@@ -381,6 +447,7 @@ private fun ProviderInstanceCard(
 
 // ==================== 添加 Provider 对话框 ====================
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun AddProviderDialog(
     onDismiss: () -> Unit,
@@ -394,6 +461,7 @@ private fun AddProviderDialog(
     var model by remember { mutableStateOf("") }
     var showApiKey by remember { mutableStateOf(false) }
     var enableOnCreate by remember { mutableStateOf(true) }
+    var typeExpanded by remember { mutableStateOf(false) }
 
     // 当切换 Provider 类型时，更新默认值
     val selectedType = availableTypes.getOrNull(selectedTypeIndex)
@@ -414,28 +482,29 @@ private fun AddProviderDialog(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                // Provider 类型选择
+                // Provider 类型选择 — 下拉框（对齐原项目 <select>）
                 Text("Provider 类型", style = MaterialTheme.typography.labelMedium)
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    // 用 FlowRow 更好，但为简单起见用 wrap
-                }
-                // 类型按钮列表
-                availableTypes.forEachIndexed { index, meta ->
-                    val isSelected = index == selectedTypeIndex
-                    FilterChip(
-                        selected = isSelected,
-                        onClick = {
-                            selectedTypeIndex = index
-                            displayName = meta.name
-                        },
-                        label = { Text(meta.name, style = MaterialTheme.typography.bodySmall) },
-                        leadingIcon = if (isSelected) {
-                            { Icon(Icons.Default.Check, null, modifier = Modifier.size(14.dp)) }
-                        } else null,
+                ExposedDropdownMenuBox(expanded = typeExpanded, onExpandedChange = { typeExpanded = it }) {
+                    OutlinedTextField(
+                        value = selectedType?.name ?: "",
+                        onValueChange = {},
+                        readOnly = true,
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(typeExpanded) },
+                        modifier = Modifier.fillMaxWidth().menuAnchor(),
+                        singleLine = true,
                     )
+                    ExposedDropdownMenu(expanded = typeExpanded, onDismissRequest = { typeExpanded = false }) {
+                        availableTypes.forEachIndexed { index, meta ->
+                            DropdownMenuItem(
+                                text = { Text(meta.name) },
+                                onClick = {
+                                    selectedTypeIndex = index
+                                    displayName = meta.name
+                                    typeExpanded = false
+                                },
+                            )
+                        }
+                    }
                 }
 
                 // 描述
@@ -639,6 +708,152 @@ private fun EditProviderDialog(
     )
 }
 
+// ==================== 添加 TTS Provider 对话框 ====================
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AddTtsProviderDialog(
+    onDismiss: () -> Unit,
+    onSave: (TTSProviderInstanceConfig) -> Unit,
+) {
+    val availableTypes = remember { TTSProviderRegistry.getAll() }
+    var selectedTypeIndex by remember { mutableIntStateOf(0) }
+    var displayName by remember { mutableStateOf("") }
+    var apiKey by remember { mutableStateOf("") }
+    var baseUrl by remember { mutableStateOf("") }
+    var model by remember { mutableStateOf("") }
+    var showApiKey by remember { mutableStateOf(false) }
+    var typeExpanded by remember { mutableStateOf(false) }
+
+    val selectedType = availableTypes.getOrNull(selectedTypeIndex)
+    LaunchedEffect(selectedTypeIndex) {
+        if (selectedType != null) {
+            if (displayName.isBlank()) displayName = selectedType.name
+            val schema = selectedType.configSchema
+            baseUrl = schema.find { it.key == "baseUrl" }?.default ?: ""
+            model = schema.find { it.key == "model" }?.default ?: ""
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("添加 TTS Provider") },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                // TTS Provider 类型选择 — 下拉框
+                Text("Provider 类型", style = MaterialTheme.typography.labelMedium)
+                ExposedDropdownMenuBox(expanded = typeExpanded, onExpandedChange = { typeExpanded = it }) {
+                    OutlinedTextField(
+                        value = selectedType?.name ?: "",
+                        onValueChange = {},
+                        readOnly = true,
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(typeExpanded) },
+                        modifier = Modifier.fillMaxWidth().menuAnchor(),
+                        singleLine = true,
+                    )
+                    ExposedDropdownMenu(expanded = typeExpanded, onDismissRequest = { typeExpanded = false }) {
+                        availableTypes.forEachIndexed { index, meta ->
+                            DropdownMenuItem(
+                                text = { Text(meta.name) },
+                                onClick = {
+                                    selectedTypeIndex = index
+                                    displayName = meta.name
+                                    typeExpanded = false
+                                },
+                            )
+                        }
+                    }
+                }
+
+                selectedType?.description?.takeIf { it.isNotBlank() }?.let { desc ->
+                    Text(desc, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+
+                HorizontalDivider()
+
+                // 显示名称
+                OutlinedTextField(
+                    value = displayName,
+                    onValueChange = { displayName = it },
+                    label = { Text("显示名称") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+
+                // API Key
+                OutlinedTextField(
+                    value = apiKey,
+                    onValueChange = { apiKey = it },
+                    label = { Text("API Key") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    visualTransformation = if (showApiKey) VisualTransformation.None else PasswordVisualTransformation(),
+                    trailingIcon = {
+                        IconButton(onClick = { showApiKey = !showApiKey }) {
+                            Icon(
+                                if (showApiKey) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                contentDescription = null,
+                            )
+                        }
+                    },
+                )
+
+                // Base URL
+                OutlinedTextField(
+                    value = baseUrl,
+                    onValueChange = { baseUrl = it },
+                    label = { Text("API Base URL") },
+                    placeholder = { Text(selectedType?.configSchema?.find { it.key == "baseUrl" }?.placeholder ?: "") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+
+                // Model / Voice
+                OutlinedTextField(
+                    value = model,
+                    onValueChange = { model = it },
+                    label = { Text("模型 / 语音") },
+                    placeholder = { Text(selectedType?.configSchema?.find { it.key == "model" }?.placeholder ?: "") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    val providerId = selectedType?.id ?: return@TextButton
+                    val instanceId = generateInstanceId()
+                    onSave(
+                        TTSProviderInstanceConfig(
+                            instanceId = instanceId,
+                            providerId = providerId,
+                            displayName = displayName.ifBlank { selectedType.name },
+                            config = ProviderConfig(
+                                id = instanceId,
+                                name = displayName.ifBlank { selectedType.name },
+                                apiKey = apiKey.takeIf { it.isNotBlank() },
+                                baseUrl = baseUrl.takeIf { it.isNotBlank() },
+                                model = model.takeIf { it.isNotBlank() },
+                            ),
+                            enabled = true,
+                        ),
+                    )
+                },
+                enabled = displayName.isNotBlank(),
+            ) {
+                Text("保存")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("取消") }
+        },
+    )
+}
+
 private fun generateInstanceId(): String = buildString {
     append("inst-")
     repeat(12) { append("0123456789abcdef"[Random.nextInt(16)]) }
@@ -650,9 +865,10 @@ private fun generateInstanceId(): String = buildString {
 private fun ToolsTab() {
     val pluginManager: PluginManager = koinInject()
     val toolProviders by pluginManager.toolProviders.collectAsState()
+    val toolEnabledVersion by pluginManager.toolEnabledVersion.collectAsState()
 
-    // 使用 getAllToolsWithSource 获取工具及其来源插件
-    val toolsWithSource = remember(toolProviders) {
+    // 使用 getAllToolsWithSource 获取工具及其来源插件（不过滤禁用工具，供 UI 展示）
+    val toolsWithSource = remember(toolProviders, toolEnabledVersion) {
         pluginManager.getAllToolsWithSource()
     }
 
@@ -671,8 +887,10 @@ private fun ToolsTab() {
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    val enabledCount = toolsWithSource.count { pluginManager.isToolEnabled(it.first.name) }
                     Text(
-                        I18nManager.t("agent.tools.count").replace("%d", "${toolsWithSource.size}"),
+                        I18nManager.t("agent.tools.count").replace("%d", "${toolsWithSource.size}") +
+                            if (enabledCount < toolsWithSource.size) "（${enabledCount} 个已启用）" else "",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -686,7 +904,8 @@ private fun ToolsTab() {
                     EmptyHint(I18nManager.t("agent.tools.empty"))
                 } else {
                     Spacer(Modifier.height(8.dp))
-                    toolsWithSource.forEach { (tool, source) ->
+                    toolsWithSource.forEach { (tool, _) ->
+                        val isEnabled = pluginManager.isToolEnabled(tool.name)
                         Card(
                             modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
                             colors = CardDefaults.cardColors(
@@ -699,50 +918,55 @@ private fun ToolsTab() {
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                    ) {
-                                        Text(
-                                            tool.name,
-                                            style = MaterialTheme.typography.titleSmall,
-                                            color = MaterialTheme.colorScheme.primary,
-                                        )
-                                        // 来源标签
-                                        val sourceIcon = if (source.startsWith("builtin") || source == "内置") "⚡" else "🔌"
-                                        AssistChip(
-                                            onClick = {},
-                                            label = {
-                                                Text(
-                                                    "$sourceIcon $source",
-                                                    style = MaterialTheme.typography.labelSmall,
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        ) {
+                                            Text(
+                                                tool.name,
+                                                style = MaterialTheme.typography.titleSmall,
+                                                color = if (isEnabled)
+                                                    MaterialTheme.colorScheme.primary
+                                                else
+                                                    MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                            )
+                                            if (tool.requireConfirm) {
+                                                AssistChip(
+                                                    onClick = {},
+                                                    label = {
+                                                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                                                            Icon(Icons.Default.Lock, contentDescription = null, modifier = Modifier.size(12.dp))
+                                                            Text("需确认", style = MaterialTheme.typography.labelSmall)
+                                                        }
+                                                    },
                                                 )
-                                            },
-                                        )
-                                    }
-                                    if (tool.requireConfirm) {
-                                        AssistChip(
-                                            onClick = {},
-                                            label = { Text("🔒 需确认", style = MaterialTheme.typography.labelSmall) },
-                                        )
-                                    }
-                                }
-                                Text(
-                                    tool.description,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                                // 显示参数信息
-                                tool.parameters?.let { params ->
-                                    val properties = params["properties"]
-                                    if (properties != null) {
-                                        Spacer(Modifier.height(4.dp))
+                                            }
+                                        }
                                         Text(
-                                            "参数: ${properties.jsonObject.keys.joinToString(", ")}",
+                                            tool.description,
                                             style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         )
+                                        // 显示参数信息
+                                        tool.parameters?.let { params ->
+                                            val properties = params["properties"]
+                                            if (properties != null) {
+                                                Spacer(Modifier.height(4.dp))
+                                                Text(
+                                                    "参数: ${properties.jsonObject.keys.joinToString(", ")}",
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                                )
+                                            }
+                                        }
                                     }
+                                    Switch(
+                                        checked = isEnabled,
+                                        onCheckedChange = { enabled ->
+                                            pluginManager.setToolEnabled(tool.name, enabled)
+                                        },
+                                    )
                                 }
                             }
                         }
@@ -752,18 +976,320 @@ private fun ToolsTab() {
         }
 
         SectionHeader(I18nManager.t("agent.mcp.title"), Icons.Default.Cable)
-        Card(modifier = Modifier.fillMaxWidth()) {
-            Column(modifier = Modifier.padding(16.dp)) {
+        McpServerSection()
+    }
+}
+
+// ==================== MCP 服务器管理 ====================
+
+/**
+ * MCP 服务器管理区域 — 对齐原项目 MCP 管理 UI
+ *
+ * 功能：
+ * - 服务器列表（状态指示灯、工具数量、连接/断开/删除按钮）
+ * - 添加新服务器对话框（名称、URL、描述、自动连接、请求头）
+ */
+@Composable
+private fun McpServerSection() {
+    val mcpManager: McpManager = koinInject()
+    val serverConfigs by mcpManager.serverConfigs.collectAsState()
+    val serverStatuses by mcpManager.serverStatuses.collectAsState()
+    val scope = rememberCoroutineScope()
+
+    var showAddDialog by remember { mutableStateOf(false) }
+    var editingServer by remember { mutableStateOf<McpServerConfig?>(null) }
+    var connectingServer by remember { mutableStateOf<String?>(null) }
+
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            if (serverConfigs.isEmpty()) {
                 EmptyHint(I18nManager.t("agent.mcp.noServers"))
                 Spacer(Modifier.height(12.dp))
-                FilledTonalButton(onClick = { /* add MCP */ }) {
-                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text(I18nManager.t("agent.mcp.add"))
+            } else {
+                serverConfigs.forEach { config ->
+                    val status = serverStatuses[config.name]
+                    val isConnected = status?.connected == true
+                    val isConnecting = connectingServer == config.name
+
+                    Card(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                        ),
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            // 第一行：名称 + 状态指示 + 操作按钮
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    // 状态指示灯
+                                    val statusColor = when {
+                                        isConnecting -> MaterialTheme.colorScheme.tertiary
+                                        isConnected -> MaterialTheme.colorScheme.primary
+                                        status?.error != null -> MaterialTheme.colorScheme.error
+                                        else -> MaterialTheme.colorScheme.outline
+                                    }
+                                    Surface(
+                                        modifier = Modifier.size(10.dp),
+                                        shape = MaterialTheme.shapes.small,
+                                        color = statusColor,
+                                    ) {}
+
+                                    Text(
+                                        config.name,
+                                        style = MaterialTheme.typography.titleSmall,
+                                    )
+
+                                    // 工具数量标签
+                                    if (isConnected && (status?.toolCount ?: 0) > 0) {
+                                        AssistChip(
+                                            onClick = {},
+                                            label = {
+                                                Text(
+                                                    "${status?.toolCount} ${I18nManager.t("agent.mcp.toolCount")}",
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                )
+                                            },
+                                        )
+                                    }
+                                }
+
+                                // 操作按钮
+                                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    if (isConnecting) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(20.dp),
+                                            strokeWidth = 2.dp,
+                                        )
+                                    } else if (isConnected) {
+                                        // 断开按钮
+                                        IconButton(
+                                            onClick = {
+                                                mcpManager.disconnectServer(config.name)
+                                            },
+                                            modifier = Modifier.size(32.dp),
+                                        ) {
+                                            Icon(
+                                                Icons.Default.LinkOff,
+                                                contentDescription = I18nManager.t("agent.mcp.disconnect"),
+                                                modifier = Modifier.size(18.dp),
+                                                tint = MaterialTheme.colorScheme.error,
+                                            )
+                                        }
+                                    } else {
+                                        // 连接按钮
+                                        IconButton(
+                                            onClick = {
+                                                connectingServer = config.name
+                                                scope.launch {
+                                                    try {
+                                                        mcpManager.connectServer(config.name)
+                                                    } catch (_: Exception) {
+                                                        // 错误已在 status 中体现
+                                                    } finally {
+                                                        connectingServer = null
+                                                    }
+                                                }
+                                            },
+                                            modifier = Modifier.size(32.dp),
+                                        ) {
+                                            Icon(
+                                                Icons.Default.Link,
+                                                contentDescription = I18nManager.t("agent.mcp.connect"),
+                                                modifier = Modifier.size(18.dp),
+                                                tint = MaterialTheme.colorScheme.primary,
+                                            )
+                                        }
+                                    }
+
+                                    // 删除按钮
+                                    IconButton(
+                                        onClick = { mcpManager.removeServerConfig(config.name) },
+                                        modifier = Modifier.size(32.dp),
+                                    ) {
+                                        Icon(
+                                            Icons.Default.Delete,
+                                            contentDescription = I18nManager.t("agent.mcp.delete"),
+                                            modifier = Modifier.size(18.dp),
+                                            tint = MaterialTheme.colorScheme.error.copy(alpha = 0.7f),
+                                        )
+                                    }
+                                }
+                            }
+
+                            // URL + 描述
+                            Text(
+                                config.url,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            if (config.description.isNotBlank()) {
+                                Text(
+                                    config.description,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                )
+                            }
+
+                            // 错误信息
+                            status?.error?.let { error ->
+                                Spacer(Modifier.height(4.dp))
+                                Text(
+                                    error,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.error,
+                                )
+                            }
+                        }
+                    }
                 }
+
+                Spacer(Modifier.height(8.dp))
+            }
+
+            // 添加按钮
+            FilledTonalButton(onClick = { showAddDialog = true }) {
+                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(4.dp))
+                Text(I18nManager.t("agent.mcp.add"))
             }
         }
     }
+
+    // 添加/编辑对话框
+    if (showAddDialog || editingServer != null) {
+        McpAddServerDialog(
+            initial = editingServer,
+            onDismiss = {
+                showAddDialog = false
+                editingServer = null
+            },
+            onSave = { config ->
+                if (editingServer != null) {
+                    mcpManager.updateServerConfig(editingServer!!.name, config)
+                } else {
+                    mcpManager.addServerConfig(config)
+                }
+                showAddDialog = false
+                editingServer = null
+            },
+        )
+    }
+}
+
+/**
+ * MCP 添加/编辑服务器对话框
+ * 对齐原项目 MCP 添加表单（仅保留 SSE 网络传输相关字段）
+ */
+@Composable
+private fun McpAddServerDialog(
+    initial: McpServerConfig?,
+    onDismiss: () -> Unit,
+    onSave: (McpServerConfig) -> Unit,
+) {
+    var name by remember { mutableStateOf(initial?.name ?: "") }
+    var url by remember { mutableStateOf(initial?.url ?: "") }
+    var description by remember { mutableStateOf(initial?.description ?: "") }
+    var autoStart by remember { mutableStateOf(initial?.autoStart ?: false) }
+    var headersText by remember {
+        mutableStateOf(
+            initial?.headers?.entries?.joinToString("\n") { "${it.key}: ${it.value}" } ?: ""
+        )
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text(
+                if (initial != null) I18nManager.t("agent.mcp.edit")
+                else I18nManager.t("agent.mcp.add")
+            )
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text(I18nManager.t("agent.mcp.name")) },
+                    placeholder = { Text("my-mcp-server") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                )
+                OutlinedTextField(
+                    value = url,
+                    onValueChange = { url = it },
+                    label = { Text(I18nManager.t("agent.mcp.url")) },
+                    placeholder = { Text("http://localhost:3001/sse") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                )
+                OutlinedTextField(
+                    value = description,
+                    onValueChange = { description = it },
+                    label = { Text(I18nManager.t("agent.mcp.description")) },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                )
+                OutlinedTextField(
+                    value = headersText,
+                    onValueChange = { headersText = it },
+                    label = { Text(I18nManager.t("agent.mcp.headers")) },
+                    placeholder = { Text("Authorization: Bearer xxx") },
+                    modifier = Modifier.fillMaxWidth(),
+                    minLines = 2,
+                    maxLines = 4,
+                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Checkbox(checked = autoStart, onCheckedChange = { autoStart = it })
+                    Text(
+                        I18nManager.t("agent.mcp.autoStart"),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    if (name.isBlank() || url.isBlank()) return@TextButton
+
+                    // 解析 headers（每行 "Key: Value" 格式）
+                    val headers = headersText.lines()
+                        .filter { it.contains(":") }
+                        .associate {
+                            val idx = it.indexOf(":")
+                            it.substring(0, idx).trim() to it.substring(idx + 1).trim()
+                        }
+
+                    onSave(McpServerConfig(
+                        name = name.trim(),
+                        url = url.trim(),
+                        description = description.trim(),
+                        autoStart = autoStart,
+                        enabled = true,
+                        headers = headers,
+                    ))
+                },
+                enabled = name.isNotBlank() && url.isNotBlank(),
+            ) {
+                Text(I18nManager.t("agent.mcp.save"))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(I18nManager.t("agent.mcp.cancel"))
+            }
+        },
+    )
 }
 
 // ==================== 插件标签页 ====================
@@ -1002,18 +1528,6 @@ private fun CommandsTab(commands: List<CommandDefinition>) {
                                     else
                                         MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
                                 )
-                                // 来源标签
-                                cmd.category?.takeIf { it.isNotBlank() }?.let { source ->
-                                    AssistChip(
-                                        onClick = {},
-                                        label = {
-                                            Text(
-                                                source,
-                                                style = MaterialTheme.typography.labelSmall,
-                                            )
-                                        },
-                                    )
-                                }
                             }
                             // 启用/禁用开关
                             Switch(
@@ -1049,41 +1563,149 @@ private fun CommandsTab(commands: List<CommandDefinition>) {
 
 @Composable
 private fun SkillsTab() {
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        SectionHeader(I18nManager.t("agent.skills.title"), Icons.Default.AutoAwesome)
+    val builtinAgent: BuiltinAgentService = koinInject()
+    val skills by builtinAgent.skillManager.skillsFlow.collectAsState()
+    val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
 
-        Text(
-            I18nManager.t("agent.skills.description"),
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
+    // 文件选择器 — 导入技能 zip
+    var importMessage by remember { mutableStateOf<String?>(null) }
+    val openFilePicker = com.gameswu.nyadeskpet.ui.rememberFilePickerLauncher(
+        mimeTypes = listOf("application/zip", "application/x-zip-compressed", "application/octet-stream"),
+        onResult = { result ->
+            if (result?.bytes != null) {
+                val (info, error) = builtinAgent.skillManager.importFromZip(result.bytes)
+                importMessage = if (info != null) {
+                    "成功导入技能: ${info.name}"
+                } else {
+                    "导入失败: ${error ?: "未知错误"}"
+                }
+            }
+        },
+    )
 
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+    // 显示导入结果 Snackbar
+    LaunchedEffect(importMessage) {
+        importMessage?.let {
+            snackbarHostState.showSnackbar(it)
+            importMessage = null
+        }
+    }
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
+            SectionHeader(I18nManager.t("agent.skills.title"), Icons.Default.AutoAwesome)
+
             Text(
-                I18nManager.t("agent.skills.count").replace("%d", "0"),
+                I18nManager.t("agent.skills.description"),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
-            IconButton(onClick = { /* refresh */ }) {
-                Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+
+            val enabledCount = skills.count { it.enabled }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    I18nManager.t("agent.skills.count").replace("%d", "${skills.size}") +
+                        if (enabledCount < skills.size) "（${enabledCount} 个已启用）" else "",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    // 导入技能按钮
+                    IconButton(onClick = { openFilePicker() }) {
+                        Icon(Icons.Default.Add, contentDescription = "导入技能", modifier = Modifier.size(18.dp))
+                    }
+                    IconButton(onClick = {
+                        // 触发刷新（重新读取 skillsFlow）
+                    }) {
+                        Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+                    }
+                }
             }
+
+        if (skills.isEmpty()) {
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Box(modifier = Modifier.padding(24.dp).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    EmptyHint(I18nManager.t("agent.skills.empty"))
+                }
+            }
+        } else {
+            skills.forEach { skill ->
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                ) {
+                                    Text(
+                                        skill.name,
+                                        style = MaterialTheme.typography.titleSmall,
+                                        color = if (skill.enabled)
+                                            MaterialTheme.colorScheme.primary
+                                        else
+                                            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                    )
+                                    AssistChip(
+                                        onClick = {},
+                                        label = {
+                                            Text(skill.category, style = MaterialTheme.typography.labelSmall)
+                                        },
+                                    )
+                                }
+                                Text(
+                                    skill.description,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                if (skill.parameterNames.isNotEmpty()) {
+                                    Text(
+                                        "参数: ${skill.parameterNames.joinToString(", ")}",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                    )
+                                }
+                                if (skill.exampleCount > 0) {
+                                    Text(
+                                        "${skill.exampleCount} 个示例",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                    )
+                                }
+                            }
+                            Switch(
+                                checked = skill.enabled,
+                                onCheckedChange = { enabled ->
+                                    builtinAgent.skillManager.setEnabled(skill.name, enabled)
+                                },
+                            )
+                        }
+                    }
+                }
+            }
+        }
         }
 
-        Card(modifier = Modifier.fillMaxWidth()) {
-            Box(modifier = Modifier.padding(24.dp).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                EmptyHint(I18nManager.t("agent.skills.empty"))
-            }
-        }
+        // Snackbar 用于显示导入结果
+        SnackbarHost(
+            hostState = snackbarHostState,
+            modifier = Modifier.align(Alignment.BottomCenter)
+        )
     }
 }
 

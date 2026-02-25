@@ -16,10 +16,7 @@
 
 - 🎭 **Live2D 模型渲染** — 原生 OpenGL ES 渲染，支持动作、表情、物理演算与 Pose 系统
 - 🤖 **内置 AI Agent** — 支持多种 LLM 供应商，内置 Agent Pipeline 架构
-- 🗣️ **语音交互** — TTS 语音合成（Edge TTS / OpenAI）、ASR 语音识别（SenseVoice）、口型同步
 - 🧩 **插件体系** — 与原项目对齐的插件架构，支持表情/动作/命令等能力
-- 👆 **触碰交互** — 基于 Live2D HitArea 的触碰反应系统
-- 🌐 **双语支持** — 中文 / English 界面
 
 ## 与原项目的关系
 
@@ -75,4 +72,4 @@ API 协议、插件接口、数据格式等与原项目保持对齐。
 
 ## 许可证
 
-MIT License
+[MIT License](LICENSE)

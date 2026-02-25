@@ -101,13 +101,21 @@ fun ChatBubble(
             // 附件预览
             if (!attachment.isNullOrBlank()) {
                 Spacer(Modifier.height(4.dp))
-                Text(
-                    text = "📎 $attachment",
-                    style = MaterialTheme.typography.bodySmall,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    color = if (isUser) Color.White.copy(alpha = 0.85f) else MaterialTheme.colorScheme.primary
-                )
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Icon(
+                        Icons.Default.AttachFile,
+                        contentDescription = null,
+                        modifier = Modifier.size(14.dp),
+                        tint = if (isUser) Color.White.copy(alpha = 0.85f) else MaterialTheme.colorScheme.primary,
+                    )
+                    Text(
+                        text = attachment,
+                        style = MaterialTheme.typography.bodySmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        color = if (isUser) Color.White.copy(alpha = 0.85f) else MaterialTheme.colorScheme.primary,
+                    )
+                }
             }
         }
     }

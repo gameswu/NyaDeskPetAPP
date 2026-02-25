@@ -4,6 +4,7 @@ import com.gameswu.nyadeskpet.agent.AgentClient
 import com.gameswu.nyadeskpet.agent.BuiltinAgentService
 import com.gameswu.nyadeskpet.agent.CharacterInfo
 import com.gameswu.nyadeskpet.agent.ResponseController
+import com.gameswu.nyadeskpet.agent.mcp.McpManager
 import com.gameswu.nyadeskpet.data.ConversationManager
 import com.gameswu.nyadeskpet.data.ModelDataManager
 import com.gameswu.nyadeskpet.data.PluginConfigStorage
@@ -23,6 +24,9 @@ val commonModule = module {
 
     // 插件系统（Tool / Panel / Widget / Command）— 注入 PluginConfigStorage 实现持久化
     single { PluginManager(get<PluginConfigStorage>()) }
+
+    // MCP 管理器（管理多个 MCP 服务器连接，将 MCP 工具注册到 PluginManager）
+    single { McpManager(get<PluginManager>()) }
 
     // 领域层与控制器
     singleOf(::ResponseController)
@@ -59,6 +63,13 @@ fun org.koin.core.KoinApplication.setupWiring() {
 
     // 初始化插件系统，注册所有内置 Agent 插件
     builtinAgentService.initializePlugins()
+
+    // 初始化 MCP 管理器：加载已保存配置，自动连接标记了 autoStart 的服务器
+    val mcpManager: McpManager = koin.get()
+    mcpManager.onConfigsChanged = { configs ->
+        settingsRepo.update { it.copy(mcpServers = configs) }
+    }
+    mcpManager.initialize(settingsRepo.current.mcpServers)
 
     agentClient.onConnectedCallback = {
         val settings = settingsRepo.current

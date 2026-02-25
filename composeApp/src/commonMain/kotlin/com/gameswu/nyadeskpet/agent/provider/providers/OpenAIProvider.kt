@@ -17,7 +17,7 @@ import io.ktor.http.*
 import io.ktor.utils.io.*
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.*
 
 // ==================== OpenAI API 模型 ====================
 
@@ -35,7 +35,8 @@ internal data class OaiChatRequest(
 @Serializable
 internal data class OaiMessage(
     val role: String,
-    val content: String? = null,
+    /** content 可以是字符串或 ContentPart 数组（多模态），使用 JsonElement 兼容两种格式 */
+    val content: JsonElement? = null,
     @SerialName("reasoning_content") val reasoningContent: String? = null,
     @SerialName("tool_calls") val toolCalls: List<OaiToolCall>? = null,
     @SerialName("tool_call_id") val toolCallId: String? = null,
@@ -177,24 +178,48 @@ open class OpenAIProvider(config: ProviderConfig) : LLMProvider(config) {
     // ==================== 消息转换 ====================
 
     /**
-     * 将内部 ChatMessage 转换为 OpenAI API 消息格式
+     * 将内部 ChatMessage 转换为 OpenAI API 消息格式。
+     * 对齐原项目 openai.ts convertMessages：
+     * - 支持多模态 Vision（image_url content parts）
+     * - 支持工具结果带图片（tool role + content array）
+     * - 支持用户消息带图片附件
      */
     private fun convertMessages(messages: List<ChatMessage>, systemPrompt: String?): List<OaiMessage> {
         val result = mutableListOf<OaiMessage>()
 
         // 系统提示词
         if (!systemPrompt.isNullOrBlank()) {
-            result.add(OaiMessage(role = "system", content = systemPrompt))
+            result.add(OaiMessage(role = "system", content = JsonPrimitive(systemPrompt)))
         }
 
         for (msg in messages) {
-            // 工具结果消息
+            // 工具结果消息 — 支持多模态（图片+文本）
             if (msg.role == "tool") {
-                result.add(OaiMessage(
-                    role = "tool",
-                    content = msg.content,
-                    toolCallId = msg.toolCallId,
-                ))
+                if (!msg.images.isNullOrEmpty()) {
+                    // 多模态工具结果：content 为 ContentPart 数组
+                    val parts = buildJsonArray {
+                        add(buildJsonObject {
+                            put("type", JsonPrimitive("text"))
+                            put("text", JsonPrimitive(msg.content))
+                        })
+                        for (img in msg.images) {
+                            add(buildJsonObject {
+                                put("type", JsonPrimitive("image_url"))
+                                putJsonObject("image_url") {
+                                    put("url", JsonPrimitive("data:${img.mimeType};base64,${img.data}"))
+                                    put("detail", JsonPrimitive("auto"))
+                                }
+                            })
+                        }
+                    }
+                    result.add(OaiMessage(role = "tool", content = parts, toolCallId = msg.toolCallId))
+                } else {
+                    result.add(OaiMessage(
+                        role = "tool",
+                        content = JsonPrimitive(msg.content),
+                        toolCallId = msg.toolCallId,
+                    ))
+                }
                 continue
             }
 
@@ -202,7 +227,7 @@ open class OpenAIProvider(config: ProviderConfig) : LLMProvider(config) {
             if (msg.role == "assistant" && !msg.toolCalls.isNullOrEmpty()) {
                 result.add(OaiMessage(
                     role = "assistant",
-                    content = msg.content.takeIf { it.isNotEmpty() },
+                    content = msg.content.takeIf { it.isNotEmpty() }?.let { JsonPrimitive(it) },
                     reasoningContent = msg.reasoningContent,
                     toolCalls = msg.toolCalls.map { tc ->
                         OaiToolCall(
@@ -214,18 +239,50 @@ open class OpenAIProvider(config: ProviderConfig) : LLMProvider(config) {
                 continue
             }
 
+            // 用户/助手消息带图片附件（Vision 多模态）
+            if (msg.attachment != null && msg.attachment.type == "image") {
+                val parts = buildJsonArray {
+                    add(buildJsonObject {
+                        put("type", JsonPrimitive("text"))
+                        put("text", JsonPrimitive(msg.content))
+                    })
+                    if (!msg.attachment.data.isNullOrBlank()) {
+                        // Base64 图片
+                        val mimeType = msg.attachment.mimeType ?: "image/png"
+                        add(buildJsonObject {
+                            put("type", JsonPrimitive("image_url"))
+                            putJsonObject("image_url") {
+                                put("url", JsonPrimitive("data:$mimeType;base64,${msg.attachment.data}"))
+                                put("detail", JsonPrimitive("auto"))
+                            }
+                        })
+                    } else if (!msg.attachment.url.isNullOrBlank()) {
+                        // URL 图片
+                        add(buildJsonObject {
+                            put("type", JsonPrimitive("image_url"))
+                            putJsonObject("image_url") {
+                                put("url", JsonPrimitive(msg.attachment.url))
+                                put("detail", JsonPrimitive("auto"))
+                            }
+                        })
+                    }
+                }
+                result.add(OaiMessage(role = msg.role, content = parts))
+                continue
+            }
+
             // 助手消息带 reasoning_content（DeepSeek thinking mode）
             if (msg.role == "assistant" && msg.reasoningContent != null) {
                 result.add(OaiMessage(
                     role = msg.role,
-                    content = msg.content,
+                    content = JsonPrimitive(msg.content),
                     reasoningContent = msg.reasoningContent,
                 ))
                 continue
             }
 
             // 普通消息
-            result.add(OaiMessage(role = msg.role, content = msg.content))
+            result.add(OaiMessage(role = msg.role, content = JsonPrimitive(msg.content)))
         }
 
         return result

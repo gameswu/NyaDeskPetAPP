@@ -23,7 +23,7 @@ class CoreCommandsPlugin : Plugin {
     override fun onLoad(context: PluginContext) {
         context.registerCommand("clear", "清除对话历史") {
             context.clearConversationHistory()
-            "✅ 对话历史已清除"
+            "对话历史已清除"
         }
 
         context.registerCommand("history", "查看对话历史") {
