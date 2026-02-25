@@ -1,6 +1,7 @@
 package com.gameswu.nyadeskpet
 
 import platform.Foundation.NSBundle
+import platform.Foundation.NSDateFormatter
 import platform.Foundation.NSDate
 import platform.Foundation.timeIntervalSince1970
 import platform.UIKit.UIDevice
@@ -20,6 +21,13 @@ actual fun currentTimeMillis(): Long = (NSDate().timeIntervalSince1970 * 1000).t
 actual fun getAppVersion(): String {
     return NSBundle.mainBundle.infoDictionary?.get("CFBundleShortVersionString") as? String
         ?: AppBuildConfig.VERSION_NAME
+}
+
+actual fun formatEpochMillis(ms: Long): String {
+    val formatter = NSDateFormatter()
+    formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+    val date = NSDate(timeIntervalSince1970 = ms / 1000.0)
+    return formatter.stringFromDate(date)
 }
 
 actual class PlatformContext

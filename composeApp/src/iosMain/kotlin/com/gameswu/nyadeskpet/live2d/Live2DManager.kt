@@ -46,4 +46,26 @@ actual class Live2DManager(private val context: PlatformContext) {
         // TODO: implement via iOS bundle resource reading
         return null
     }
+
+    // ===== 视线跟随 =====
+    private val gazeController = GazeController()
+    private var eyeTrackingEnabled = true
+
+    actual fun setGazeTarget(x: Float, y: Float) {
+        if (!eyeTrackingEnabled) return
+        gazeController.setTarget(x, y)
+    }
+
+    actual fun clearGazeTarget() {
+        gazeController.clearTarget()
+    }
+
+    actual fun resetGaze() {
+        gazeController.forceReset()
+    }
+
+    actual fun setEyeTrackingEnabled(enabled: Boolean) {
+        eyeTrackingEnabled = enabled
+        if (!enabled) gazeController.forceReset()
+    }
 }

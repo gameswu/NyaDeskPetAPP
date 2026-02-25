@@ -18,6 +18,14 @@
     <!-- Android 11+ 完整存储访问（用于浏览外部模型/技能文件等非媒体文件） -->
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
 
+    <!-- 悬浮窗权限 -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+
+    <!-- 前台服务权限（悬浮宠物后台保活） -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
     <application
         android:name="com.gameswu.nyadeskpet.NyaDeskPetApp"
         android:allowBackup="true"
@@ -36,6 +44,16 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- 悬浮宠物前台服务 -->
+        <service
+            android:name="com.gameswu.nyadeskpet.overlay.FloatingPetService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="floating_pet_overlay" />
+        </service>
     </application>
 
 </manifest>

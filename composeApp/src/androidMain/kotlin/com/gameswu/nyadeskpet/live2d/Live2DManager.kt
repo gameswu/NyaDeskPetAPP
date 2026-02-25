@@ -22,6 +22,11 @@ actual class Live2DManager actual constructor(private val context: PlatformConte
     @Volatile
     private var lastLoadedModelPath: String? = null
 
+    // ===== 视线跟随 =====
+    private val gazeController = GazeController()
+    @Volatile
+    private var eyeTrackingEnabled = true
+
     actual fun initialize(): Boolean = true
 
     actual fun loadModel(modelPath: String): Boolean {
@@ -141,6 +146,7 @@ actual class Live2DManager actual constructor(private val context: PlatformConte
     private fun onFrameUpdate() {
         applyParameterOverrides()
         applyLipSync()
+        applyGaze()
     }
 
     private fun applyParameterOverrides() {
@@ -182,6 +188,48 @@ actual class Live2DManager actual constructor(private val context: PlatformConte
     private fun applyLipSync() {
         val r = renderer ?: return
         r.nativeSetParameterValue("ParamMouthOpenY", lipSyncValue)
+    }
+
+    // ===== 视线跟随 =====
+
+    /**
+     * 每帧应用视线参数到 Live2D 模型。
+     * 对齐原项目 FocusController → ParamEyeBallX/Y, ParamAngleX/Y/Z, ParamBodyAngleX
+     */
+    private fun applyGaze() {
+        val r = renderer ?: return
+        val (focusX, focusY) = gazeController.update(System.currentTimeMillis())
+
+        // ParamEyeBallX/Y: 眼球方向 ±1
+        r.nativeSetParameterValue("ParamEyeBallX", focusX)
+        r.nativeSetParameterValue("ParamEyeBallY", focusY)
+        // ParamAngleX/Y: 脸部朝向 ±30
+        r.nativeSetParameterValue("ParamAngleX", focusX * 30f)
+        r.nativeSetParameterValue("ParamAngleY", focusY * 30f)
+        // ParamAngleZ: 脸部倾斜 (交叉项)
+        r.nativeSetParameterValue("ParamAngleZ", focusX * focusY * -30f)
+        // ParamBodyAngleX: 身体偏转 ±10
+        r.nativeSetParameterValue("ParamBodyAngleX", focusX * 10f)
+    }
+
+    actual fun setGazeTarget(x: Float, y: Float) {
+        if (!eyeTrackingEnabled) return
+        gazeController.setTarget(x, y)
+    }
+
+    actual fun clearGazeTarget() {
+        gazeController.clearTarget()
+    }
+
+    actual fun resetGaze() {
+        gazeController.forceReset()
+    }
+
+    actual fun setEyeTrackingEnabled(enabled: Boolean) {
+        eyeTrackingEnabled = enabled
+        if (!enabled) {
+            gazeController.forceReset()
+        }
     }
 
     private fun easeInOutCubic(t: Float): Float =

@@ -17,6 +17,12 @@ expect fun currentTimeMillis(): Long
 expect fun getAppVersion(): String
 
 /**
+ * 将毫秒时间戳格式化为本地日期时间字符串
+ * 格式: "YYYY-MM-DD HH:MM:SS"
+ */
+expect fun formatEpochMillis(ms: Long): String
+
+/**
  * Platform-specific context.
  * Marked as abstract to match Android Context modality.
  */

@@ -62,4 +62,29 @@ expect class Live2DManager(context: PlatformContext) {
      * 返回 null 表示无法提取（如平台未实现）。
      */
     fun extractModelInfo(modelPath: String): ModelInfo?
+
+    // ===== 视线跟随 =====
+
+    /**
+     * 设置视线跟随目标位置。
+     * @param x 归一化坐标 -1..1
+     * @param y 归一化坐标 -1..1
+     */
+    fun setGazeTarget(x: Float, y: Float)
+
+    /**
+     * 清除视线目标（手指抬起），保持当前视线方向不变。
+     */
+    fun clearGazeTarget()
+
+    /**
+     * 重置视线到默认位置 (0, 0)。
+     */
+    fun resetGaze()
+
+    /**
+     * 启用/禁用视线跟随功能。
+     * 禁用时立即重置到默认位置。
+     */
+    fun setEyeTrackingEnabled(enabled: Boolean)
 }

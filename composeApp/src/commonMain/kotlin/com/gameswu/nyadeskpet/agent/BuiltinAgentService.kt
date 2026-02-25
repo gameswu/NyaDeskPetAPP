@@ -5,6 +5,8 @@ import com.gameswu.nyadeskpet.agent.provider.ToolCallInfo
 import com.gameswu.nyadeskpet.agent.provider.providers.*
 import com.gameswu.nyadeskpet.agent.provider.tts.*
 import com.gameswu.nyadeskpet.data.ConversationManager
+import com.gameswu.nyadeskpet.data.LogLevel
+import com.gameswu.nyadeskpet.data.LogManager
 import com.gameswu.nyadeskpet.data.SettingsRepository
 import com.gameswu.nyadeskpet.plugin.*
 import com.gameswu.nyadeskpet.plugin.api.ToolDefinition
@@ -35,6 +37,7 @@ class BuiltinAgentService(
     private val settingsRepo: SettingsRepository,
     private val pluginManager: PluginManager,
     private val conversationManager: ConversationManager,
+    private val logManager: LogManager,
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
@@ -123,6 +126,7 @@ class BuiltinAgentService(
             primaryInstanceId = instanceConfig.instanceId
         }
 
+        logManager.log(LogLevel.INFO, "添加 Provider 实例: ${instanceConfig.instanceId} (${instanceConfig.providerId})", "AgentService")
         saveConfig()
         notifyInstancesChanged()
         return true
@@ -138,6 +142,7 @@ class BuiltinAgentService(
             primaryInstanceId = providerInstances.keys.firstOrNull() ?: ""
         }
 
+        logManager.log(LogLevel.INFO, "移除 Provider 实例: $instanceId", "AgentService")
         saveConfig()
         notifyInstancesChanged()
         return true
@@ -388,6 +393,7 @@ class BuiltinAgentService(
         attachment: Attachment?,
         onEvent: suspend (AgentEvent) -> Unit,
     ) {
+        logManager.log(LogLevel.INFO, "收到用户输入: \"${text.take(100)}\"${if (attachment != null) " [附件: ${attachment.type}]" else ""}", "AgentService")
         val provider = getPrimaryProvider()
         if (provider == null) {
             onEvent(AgentEvent.Dialogue(
@@ -560,6 +566,7 @@ class BuiltinAgentService(
             )))
         } catch (e: Exception) {
             val duration = com.gameswu.nyadeskpet.currentTimeMillis() - startTime
+            logManager.log(LogLevel.ERROR, "流式对话异常: ${e.message}", "AgentService", e.stackTraceToString())
             onEvent(AgentEvent.Dialogue(
                 DialogueEvent.StreamEnd("[错误] ${e.message ?: "未知错误"}", null, duration)
             ))
@@ -635,6 +642,7 @@ class BuiltinAgentService(
                 ))
             ))
         } catch (e: Exception) {
+            logManager.log(LogLevel.ERROR, "非流式对话异常: ${e.message}", "AgentService", e.stackTraceToString())
             onEvent(AgentEvent.Dialogue(
                 DialogueEvent.Complete(DialogueData(
                     text = "[错误] ${e.message ?: "未知错误"}",
@@ -756,6 +764,7 @@ class BuiltinAgentService(
         onEvent: suspend (AgentEvent) -> Unit,
     ): List<ChatMessage> {
         val toolResultMessages = mutableListOf<ChatMessage>()
+        logManager.log(LogLevel.INFO, "执行 ${toolCalls.size} 个工具调用: ${toolCalls.joinToString { it.name }}", "AgentService")
 
         for (tc in toolCalls) {
             // 如果是技能调用，走 SkillManager
@@ -923,7 +932,7 @@ class BuiltinAgentService(
             expressionPlugin.generateExpression(text, modelInfo)
         } catch (e: Exception) {
             // 表情生成失败不影响主流程（对齐原项目行为）
-            println("[BuiltinAgentService] 表情生成出错（非致命）: ${e.message}")
+            logManager.log(LogLevel.WARN, "表情生成出错（非致命）: ${e.message}", "AgentService")
             emptyList()
         }
     }
@@ -1087,6 +1096,7 @@ class BuiltinAgentService(
      * 对齐原项目 autoActivatePlugins 拓扑排序逻辑。
      */
     fun initializePlugins() {
+        logManager.log(LogLevel.INFO, "初始化插件系统", "AgentService")
         pluginManager.initialize { pluginId -> createPluginContext(pluginId) }
 
         // 注册内置插件（顺序与原项目依赖拓扑一致）
@@ -1101,6 +1111,7 @@ class BuiltinAgentService(
         pluginManager.registerPlugin(com.gameswu.nyadeskpet.plugin.builtin.InputCollectorPlugin())
         pluginManager.registerPlugin(com.gameswu.nyadeskpet.plugin.builtin.ImageTranscriberPlugin())
         pluginManager.registerPlugin(com.gameswu.nyadeskpet.plugin.builtin.PlanningPlugin())
+        logManager.log(LogLevel.INFO, "已注册 ${pluginManager.getAllPlugins().size} 个内置插件", "AgentService")
     }
 
     /**
@@ -1247,15 +1258,15 @@ class BuiltinAgentService(
             }
 
             override fun logInfo(message: String) {
-                println("[Plugin:$pluginId] $message")
+                logManager.log(LogLevel.INFO, message, "Plugin:$pluginId")
             }
 
             override fun logWarn(message: String) {
-                println("[Plugin:$pluginId WARN] $message")
+                logManager.log(LogLevel.WARN, message, "Plugin:$pluginId")
             }
 
             override fun logError(message: String) {
-                println("[Plugin:$pluginId ERROR] $message")
+                logManager.log(LogLevel.ERROR, message, "Plugin:$pluginId")
             }
         }
     }

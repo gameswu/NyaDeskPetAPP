@@ -11,6 +11,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import com.gameswu.nyadeskpet.data.LogManager
 import com.gameswu.nyadeskpet.data.ModelDataManager
 import com.gameswu.nyadeskpet.data.SettingsRepository
 import com.gameswu.nyadeskpet.data.UpdateChecker
@@ -455,6 +456,12 @@ private fun DisplaySection(
         onCheckedChange = { repo.update { s -> s.copy(showSubtitle = it) } }
     )
 
+    SettingsToggle(
+        label = I18nManager.t("settings.enableEyeTracking"),
+        checked = settings.enableEyeTracking,
+        onCheckedChange = { repo.update { s -> s.copy(enableEyeTracking = it) } }
+    )
+
 }
 
 // ==================== 角色 ====================
@@ -486,21 +493,42 @@ private fun CharacterSection(
     }
 }
 
-// ==================== 日志 — 对齐原项目，添加日志等级勾选 ====================
+// ==================== 日志 — 对齐原项目：开关 + 等级 + 保留天数 + 文件管理 ====================
 @Composable
 private fun LogSection(
     repo: SettingsRepository,
     settings: com.gameswu.nyadeskpet.data.AppSettings,
 ) {
+    val logManager: LogManager = koinInject()
+    val coroutineScope = rememberCoroutineScope()
+    val snackbarHostState = remember { SnackbarHostState() }
+    var logFiles by remember { mutableStateOf(logManager.getLogFiles()) }
+    var logDirSize by remember { mutableStateOf(logManager.getLogDirSize()) }
+    var showDeleteAllDialog by remember { mutableStateOf(false) }
+    var fileToDelete by remember { mutableStateOf<String?>(null) }
+
+    // 刷新日志列表
+    fun refreshLogFiles() {
+        logFiles = logManager.getLogFiles()
+        logDirSize = logManager.getLogDirSize()
+    }
+
+    // ===== 日志开关 =====
     SectionHeader(I18nManager.t("settings.logEnabled"))
     SettingsToggle(
         label = I18nManager.t("settings.logEnabled"),
         checked = settings.logEnabled,
-        onCheckedChange = { repo.update { s -> s.copy(logEnabled = it) } }
+        onCheckedChange = {
+            repo.update { s -> s.copy(logEnabled = it) }
+            if (it) {
+                // 启用后立即初始化
+                logManager.initialize()
+            }
+        }
     )
 
     if (settings.logEnabled) {
-        // 日志等级 — 对齐原项目的日志等级勾选
+        // ===== 日志等级 =====
         SectionHeader(I18nManager.t("settings.logLevels"))
         val levels = listOf("debug" to "调试", "info" to "信息", "warn" to "警告", "error" to "错误", "critical" to "严重")
         Row(
@@ -523,7 +551,7 @@ private fun LogSection(
             }
         }
 
-        // 保留天数
+        // ===== 保留天数 =====
         SectionHeader(I18nManager.t("settings.logRetentionDays"))
         Text("${settings.logRetentionDays} ${I18nManager.t("settings.days")}")
         Slider(
@@ -533,6 +561,171 @@ private fun LogSection(
             colors = SliderDefaults.colors(thumbColor = Color(0xFF4CAF50), activeTrackColor = Color(0xFF4CAF50))
         )
     }
+
+    Spacer(modifier = Modifier.height(8.dp))
+
+    // ===== 日志文件管理（始终显示，不受日志开关影响）=====
+    SectionHeader("日志文件")
+
+    // 操作栏
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // 总大小
+        Text(
+            "共 ${logFiles.size} 个文件, ${formatFileSize(logDirSize)}",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f),
+        )
+        // 打开文件夹按钮
+        IconButton(onClick = {
+            val success = logManager.openLogDirectory()
+            if (!success) {
+                coroutineScope.launch {
+                    snackbarHostState.showSnackbar("日志目录: ${logManager.logDir}")
+                }
+            }
+        }) {
+            Icon(Icons.Default.FolderOpen, contentDescription = "打开文件夹")
+        }
+        // 刷新按钮
+        IconButton(onClick = { refreshLogFiles() }) {
+            Icon(Icons.Default.Refresh, contentDescription = "刷新")
+        }
+        // 删除全部按钮
+        IconButton(
+            onClick = { showDeleteAllDialog = true },
+            enabled = logFiles.any { !it.isCurrentSession },
+        ) {
+            Icon(Icons.Default.Delete, contentDescription = "删除全部", tint = MaterialTheme.colorScheme.error)
+        }
+    }
+
+    // 文件列表
+    if (logFiles.isEmpty()) {
+        Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+            Box(modifier = Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) {
+                Text("暂无日志文件", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    } else {
+        logFiles.forEach { file ->
+            Card(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                colors = if (file.isCurrentSession) {
+                    CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f))
+                } else {
+                    CardDefaults.cardColors()
+                }
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        Icons.Default.Description,
+                        contentDescription = null,
+                        modifier = Modifier.size(20.dp),
+                        tint = if (file.isCurrentSession) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                file.name,
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                            if (file.isCurrentSession) {
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    "当前会话",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                )
+                            }
+                        }
+                        Text(
+                            "${formatFileSize(file.sizeBytes)} · ${formatTimestamp(file.lastModifiedMs)}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    if (!file.isCurrentSession) {
+                        IconButton(
+                            onClick = { fileToDelete = file.name },
+                            modifier = Modifier.size(32.dp),
+                        ) {
+                            Icon(
+                                Icons.Default.Close,
+                                contentDescription = "删除",
+                                modifier = Modifier.size(16.dp),
+                                tint = MaterialTheme.colorScheme.error,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // ===== Snackbar =====
+    SnackbarHost(snackbarHostState)
+
+    // ===== 确认删除全部 =====
+    if (showDeleteAllDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteAllDialog = false },
+            title = { Text("确认删除") },
+            text = { Text("确定删除所有历史日志文件吗？当前会话日志不会被删除。") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val count = logManager.deleteAllLogFiles()
+                        showDeleteAllDialog = false
+                        refreshLogFiles()
+                        coroutineScope.launch {
+                            snackbarHostState.showSnackbar("已删除 $count 个日志文件")
+                        }
+                    },
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                ) { Text("删除") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteAllDialog = false }) { Text("取消") }
+            },
+        )
+    }
+
+    // ===== 确认删除单个 =====
+    fileToDelete?.let { fileName ->
+        AlertDialog(
+            onDismissRequest = { fileToDelete = null },
+            title = { Text("确认删除") },
+            text = { Text("确定删除日志文件 \"$fileName\" 吗？") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        logManager.deleteLogFile(fileName)
+                        fileToDelete = null
+                        refreshLogFiles()
+                    },
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                ) { Text("删除") }
+            },
+            dismissButton = {
+                TextButton(onClick = { fileToDelete = null }) { Text("取消") }
+            },
+        )
+    }
+}
+
+/** 格式化时间戳 */
+private fun formatTimestamp(ms: Long): String {
+    if (ms <= 0) return "--"
+    return com.gameswu.nyadeskpet.formatEpochMillis(ms)
 }
 
 // ==================== 关于 — 对齐原项目：版本号、检查更新、更新源、项目链接、数据管理 ====================
@@ -768,10 +961,6 @@ private fun AboutSection(repo: SettingsRepository) {
             Text(I18nManager.t("settings.donate"), color = MaterialTheme.colorScheme.primary)
         }
     }
-
-    // 存储权限管理（Android 显示，iOS 空实现）
-    Spacer(Modifier.height(4.dp))
-    StoragePermissionSection()
 }
 
 /** 格式化文件大小为人类可读字符串 */

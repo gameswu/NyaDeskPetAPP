@@ -7,6 +7,9 @@ import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.OpenInNew
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -24,6 +27,7 @@ import com.gameswu.nyadeskpet.data.SettingsRepository
 import com.gameswu.nyadeskpet.dialogue.DialogueManager
 import com.gameswu.nyadeskpet.live2d.Live2DManager
 import com.gameswu.nyadeskpet.ui.chat.ChatViewModel
+import com.gameswu.nyadeskpet.live2d.GazeController
 import kotlinx.coroutines.launch
 import org.koin.compose.koinInject
 import org.koin.compose.viewmodel.koinViewModel
@@ -67,13 +71,18 @@ fun PetScreen(viewModel: ChatViewModel = koinViewModel()) {
     var offsetX by remember { mutableFloatStateOf(0f) }   // 像素
     var offsetY by remember { mutableFloatStateOf(0f) }   // 像素
 
+    // 视线跟随：监听设置变化
+    LaunchedEffect(settings.enableEyeTracking) {
+        live2dManager.setEyeTrackingEnabled(settings.enableEyeTracking)
+    }
+
     Box(modifier = Modifier.fillMaxSize()) {
-        // Live2D Canvas — 综合手势：拖拽 + 缩放 + 点击
+        // Live2D Canvas — 综合手势：拖拽 + 缩放 + 点击 + 视线跟随
         Live2DCanvas(
             modifier = Modifier
                 .fillMaxSize()
                 .onSizeChanged { canvasSize = it }
-                .pointerInput(hitAreas) {
+                .pointerInput(hitAreas, settings.enableEyeTracking) {
                     awaitEachGesture {
                         val firstDown = awaitFirstDown(requireUnconsumed = false)
                         val downPos = firstDown.position
@@ -82,10 +91,38 @@ fun PetScreen(viewModel: ChatViewModel = koinViewModel()) {
                         var pastTouchSlop = false
                         val touchSlop = 18f // px
 
+                        // 视线跟随：跟踪最后设置的视线目标
+                        var lastGazeX = 0f
+                        var lastGazeY = 0f
+
+                        // 视线跟随：初始触摸点
+                        if (settings.enableEyeTracking && canvasSize.width > 0 && canvasSize.height > 0) {
+                            lastGazeX = (firstDown.position.x / canvasSize.width) * 2f - 1f
+                            lastGazeY = -((firstDown.position.y / canvasSize.height) * 2f - 1f)
+                            live2dManager.setGazeTarget(lastGazeX, lastGazeY)
+                        }
+
                         do {
                             val event = awaitPointerEvent()
                             val pan = event.calculatePan()
                             val zoom = event.calculateZoom()
+
+                            // 视线跟随：每帧选择离当前视线最近的触碰点
+                            if (settings.enableEyeTracking && canvasSize.width > 0 && canvasSize.height > 0) {
+                                val activePointers = event.changes.filter { it.pressed }
+                                if (activePointers.isNotEmpty()) {
+                                    val closestPtr = activePointers.minByOrNull { ptr ->
+                                        val nx = (ptr.position.x / canvasSize.width) * 2f - 1f
+                                        val ny = -((ptr.position.y / canvasSize.height) * 2f - 1f)
+                                        val dx = nx - lastGazeX
+                                        val dy = ny - lastGazeY
+                                        dx * dx + dy * dy
+                                    }!!
+                                    lastGazeX = (closestPtr.position.x / canvasSize.width) * 2f - 1f
+                                    lastGazeY = -((closestPtr.position.y / canvasSize.height) * 2f - 1f)
+                                    live2dManager.setGazeTarget(lastGazeX, lastGazeY)
+                                }
+                            }
 
                             // 累计拖拽量，用于判断是否为点击
                             totalDrag += pan
@@ -119,6 +156,11 @@ fun PetScreen(viewModel: ChatViewModel = koinViewModel()) {
                                 event.changes.forEach { if (it.positionChanged()) it.consume() }
                             }
                         } while (event.changes.any { it.pressed })
+
+                        // 视线跟随：手指全部抬起，保持最后方向
+                        if (settings.enableEyeTracking) {
+                            live2dManager.clearGazeTarget()
+                        }
 
                         // 如果没有发生拖拽/缩放 → 是点击
                         if (!didTransform) {
@@ -181,5 +223,92 @@ fun PetScreen(viewModel: ChatViewModel = koinViewModel()) {
                 }
             }
         }
+
+        // 悬浮宠物按钮（仅 Android 支持）
+        if (isOverlaySupported()) {
+            FloatingPetButton(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(16.dp)
+            )
+        }
+    }
+}
+
+/**
+ * 悬浮宠物启动/停止按钮。
+ *
+ * 状态机：直接观察 FloatingPetService.isRunningFlow，
+ * 不再维护本地副本，消除状态失同步风险。
+ */
+@Composable
+private fun FloatingPetButton(modifier: Modifier = Modifier) {
+    // 响应式状态：单一可信来源
+    val isRunning by floatingPetRunningFlow().collectAsState()
+    var showPermissionDialog by remember { mutableStateOf(false) }
+    val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+
+    val requestPermission = rememberOverlayPermissionLauncher { granted ->
+        if (granted) {
+            startFloatingPet()
+        } else {
+            scope.launch {
+                snackbarHostState.showSnackbar("需要悬浮窗权限才能在桌面显示宠物")
+            }
+        }
+    }
+
+    // 权限确认对话框
+    if (showPermissionDialog) {
+        AlertDialog(
+            onDismissRequest = { showPermissionDialog = false },
+            title = { Text("需要悬浮窗权限") },
+            text = { Text("在桌面显示宠物需要「显示在其他应用上层」权限。\n\n点击「去设置」，在设置页中允许本应用的悬浮窗权限。") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showPermissionDialog = false
+                    requestPermission()
+                }) {
+                    Text("去设置")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showPermissionDialog = false }) {
+                    Text("取消")
+                }
+            },
+        )
+    }
+
+    Box(modifier = modifier) {
+        SmallFloatingActionButton(
+            onClick = {
+                if (isRunning) {
+                    stopFloatingPet()
+                } else {
+                    if (hasOverlayPermission()) {
+                        startFloatingPet()
+                    } else {
+                        showPermissionDialog = true
+                    }
+                }
+            },
+            containerColor = if (isRunning)
+                MaterialTheme.colorScheme.errorContainer
+            else
+                MaterialTheme.colorScheme.primaryContainer,
+        ) {
+            Icon(
+                if (isRunning) Icons.Default.Close else Icons.Default.OpenInNew,
+                contentDescription = if (isRunning) "关闭悬浮宠物" else "悬浮宠物",
+            )
+        }
+
+        // Snackbar
+        SnackbarHost(
+            hostState = snackbarHostState,
+            modifier = Modifier.align(Alignment.BottomCenter)
+        )
     }
 }

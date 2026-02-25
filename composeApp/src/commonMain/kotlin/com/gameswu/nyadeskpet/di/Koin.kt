@@ -6,6 +6,7 @@ import com.gameswu.nyadeskpet.agent.CharacterInfo
 import com.gameswu.nyadeskpet.agent.ResponseController
 import com.gameswu.nyadeskpet.agent.mcp.McpManager
 import com.gameswu.nyadeskpet.data.ConversationManager
+import com.gameswu.nyadeskpet.data.LogManager
 import com.gameswu.nyadeskpet.data.ModelDataManager
 import com.gameswu.nyadeskpet.data.PluginConfigStorage
 import com.gameswu.nyadeskpet.data.SettingsRepository
@@ -57,6 +58,10 @@ fun org.koin.core.KoinApplication.setupWiring() {
     val settingsRepo: SettingsRepository = koin.get()
     val modelDataManager: ModelDataManager = koin.get()
     val builtinAgentService: BuiltinAgentService = koin.get()
+    val logManager: LogManager = koin.get()
+
+    // 初始化日志系统
+    logManager.initialize()
 
     // 首次启动时将内置模型复制到数据目录
     modelDataManager.ensureBuiltinModels()

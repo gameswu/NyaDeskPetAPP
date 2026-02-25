@@ -31,6 +31,7 @@ data class AppSettings(
 
     // Live2D 交互
     val tapConfigs: Map<String, Map<String, TapAreaConfig>> = emptyMap(),
+    val enableEyeTracking: Boolean = true,
 
     // ===== LLM Provider 实例（对齐原项目 providers.json）=====
     val llmProviderInstances: List<ProviderInstanceConfig> = emptyList(),

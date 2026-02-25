@@ -2,6 +2,7 @@ package com.gameswu.nyadeskpet.di
 
 import com.gameswu.nyadeskpet.audio.AudioStreamPlayer
 import com.gameswu.nyadeskpet.data.ConversationStorage
+import com.gameswu.nyadeskpet.data.LogManager
 import com.gameswu.nyadeskpet.data.ModelDataManager
 import com.gameswu.nyadeskpet.data.PluginConfigStorage
 import com.gameswu.nyadeskpet.data.SettingsStorage
@@ -14,6 +15,7 @@ val androidModule = module {
     single { ConversationStorage(androidContext()) }
     single { PluginConfigStorage(androidContext()) }
     single { ModelDataManager(androidContext()) }
+    single { LogManager(androidContext(), get()) }
     single { Live2DManager(androidContext()) }
     single { AudioStreamPlayer(androidContext()) }
 }

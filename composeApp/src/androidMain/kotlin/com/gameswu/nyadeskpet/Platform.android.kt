@@ -17,4 +17,9 @@ actual fun currentTimeMillis(): Long = System.currentTimeMillis()
  */
 actual fun getAppVersion(): String = AppBuildConfig.VERSION_NAME
 
+actual fun formatEpochMillis(ms: Long): String {
+    val sdf = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault())
+    return sdf.format(java.util.Date(ms))
+}
+
 actual typealias PlatformContext = Context
