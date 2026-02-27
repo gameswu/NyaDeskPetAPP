@@ -55,6 +55,14 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+
+    // 自定义 APK 输出文件名：NyaDeskPet-<版本号>-<buildType>.apk
+    applicationVariants.all {
+        outputs.all {
+            val output = this as com.android.build.gradle.internal.api.BaseVariantOutputImpl
+            output.outputFileName = "NyaDeskPet-${versionName}-${buildType.name}.apk"
+        }
+    }
 }
 
 dependencies {
