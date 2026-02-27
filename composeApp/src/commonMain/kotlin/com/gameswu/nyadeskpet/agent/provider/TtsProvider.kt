@@ -10,6 +10,9 @@
  */
 package com.gameswu.nyadeskpet.agent.provider
 
+import io.ktor.client.*
+import io.ktor.client.engine.*
+import io.ktor.client.plugins.*
 import kotlinx.serialization.Serializable
 
 // ==================== TTS 核心类型 ====================
@@ -88,19 +91,15 @@ abstract class TTSProvider(protected val config: ProviderConfig) {
     /** 获取可用音色列表 */
     open suspend fun getVoices(): List<VoiceInfo> = emptyList()
 
+    /**
+     * 创建已配置超时和代理的 HttpClient
+     */
+    protected fun buildHttpClient(block: HttpClientConfig<*>.() -> Unit = {}): HttpClient =
+        buildProviderHttpClient(config, block)
+
     /** 获取配置值 */
-    @Suppress("UNCHECKED_CAST")
-    protected fun <T> getConfigValue(key: String, defaultValue: T): T {
-        val value: Any? = when (key) {
-            "apiKey" -> config.apiKey
-            "baseUrl" -> config.baseUrl
-            "model" -> config.model
-            "timeout" -> config.timeout
-            "proxy" -> config.proxy
-            else -> config.extra[key]
-        }
-        return if (value != null && value != "") value as T else defaultValue
-    }
+    protected fun <T> getConfigValue(key: String, defaultValue: T): T =
+        getProviderConfigValue(config, key, defaultValue)
 }
 
 // ==================== TTS Provider 注册表 ====================
@@ -121,10 +120,6 @@ object TTSProviderRegistry {
 
     fun register(metadata: ProviderMetadata, factory: TTSProviderFactory) {
         entries[metadata.id] = RegistryEntry(metadata, factory)
-    }
-
-    fun unregister(id: String) {
-        entries.remove(id)
     }
 
     /** 创建 TTS Provider 实例 */
@@ -159,4 +154,20 @@ data class TTSProviderInstanceConfig(
     val displayName: String,
     val config: ProviderConfig,
     val enabled: Boolean = false,
+)
+
+/**
+ * TTS Provider 实例运行时信息（供 UI 展示）
+ * 与 LLM 侧的 ProviderInstanceInfo 对称
+ */
+data class TTSProviderInstanceInfo(
+    val instanceId: String,
+    val providerId: String,
+    val displayName: String,
+    val config: ProviderConfig,
+    val metadata: ProviderMetadata?,
+    val enabled: Boolean,
+    val status: ProviderStatus,
+    val error: String? = null,
+    val isPrimary: Boolean = false,
 )

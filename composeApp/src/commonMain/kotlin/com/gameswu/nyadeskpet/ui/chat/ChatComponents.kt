@@ -10,12 +10,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Mic
-import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -28,7 +29,7 @@ import com.mikepenz.markdown.m3.Markdown
 @Composable
 fun ConnectionBar(state: ConnectionState) {
     val (color, label) = when (state) {
-        ConnectionState.CONNECTED -> Color(0xFF4CAF50) to I18nManager.t("topBar.connected")
+        ConnectionState.CONNECTED -> MaterialTheme.colorScheme.primary to I18nManager.t("topBar.connected")
         ConnectionState.CONNECTING -> Color(0xFFFFC107) to I18nManager.t("topBar.connecting")
         ConnectionState.DISCONNECTED -> Color(0xFFF44336) to I18nManager.t("topBar.disconnected")
     }
@@ -51,7 +52,7 @@ fun ChatBubble(
 ) {
     val alignment = if (isUser) Alignment.CenterEnd else Alignment.CenterStart
     // 对齐原项目: 用户消息 #4CAF50 绿色, AI消息 #f0f0f0 灰色
-    val bgColor = if (isUser) Color(0xFF4CAF50) else MaterialTheme.colorScheme.surfaceVariant
+    val bgColor = if (isUser) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant
     val contentColor = if (isUser) Color.White else MaterialTheme.colorScheme.onSurface
     var showReasoning by remember { mutableStateOf(false) }
 
@@ -226,54 +227,78 @@ fun ChatInput(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     // 语音输入
-                    IconButton(onClick = onMicClick) {
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable(onClick = onMicClick)
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         Icon(
                             Icons.Default.Mic,
                             contentDescription = I18nManager.t("chatWindow.voice"),
                             tint = if (isMicActive) MaterialTheme.colorScheme.primary
+                                   else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            text = I18nManager.t("chatWindow.voice"),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (isMicActive) MaterialTheme.colorScheme.primary
                                    else MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                    Text(
-                        text = I18nManager.t("chatWindow.voice"),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = if (isMicActive) MaterialTheme.colorScheme.primary
-                               else MaterialTheme.colorScheme.onSurfaceVariant
-                    )
 
-                    Spacer(Modifier.width(8.dp))
+                    Spacer(Modifier.width(4.dp))
 
                     // 摄像头
-                    IconButton(onClick = onCameraClick) {
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable(onClick = onCameraClick)
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         Icon(
                             Icons.Default.Videocam,
                             contentDescription = I18nManager.t("chatWindow.camera"),
                             tint = if (isCameraActive) MaterialTheme.colorScheme.primary
+                                   else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            text = I18nManager.t("chatWindow.camera"),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (isCameraActive) MaterialTheme.colorScheme.primary
                                    else MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                    Text(
-                        text = I18nManager.t("chatWindow.camera"),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = if (isCameraActive) MaterialTheme.colorScheme.primary
-                               else MaterialTheme.colorScheme.onSurfaceVariant
-                    )
 
-                    Spacer(Modifier.width(8.dp))
+                    Spacer(Modifier.width(4.dp))
 
                     // 发送文件
-                    IconButton(onClick = onAttachClick) {
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable(onClick = onAttachClick)
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                         Icon(
                             Icons.Default.AttachFile,
                             contentDescription = I18nManager.t("chatWindow.attach"),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            text = I18nManager.t("chatWindow.attach"),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                    Text(
-                        text = I18nManager.t("chatWindow.attach"),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
                 }
 
                 // 输入框 + 发送按钮
@@ -297,7 +322,7 @@ fun ChatInput(
                             }
                         }
                     ) {
-                        Icon(Icons.Default.Send, contentDescription = I18nManager.t("chat.send"))
+                        Icon(Icons.AutoMirrored.Filled.Send, contentDescription = I18nManager.t("chat.send"))
                     }
                 }
             }

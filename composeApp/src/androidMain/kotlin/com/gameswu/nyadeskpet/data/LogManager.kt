@@ -177,24 +177,6 @@ actual class LogManager actual constructor(
         }
     }
 
-    actual fun shutdown() {
-        try {
-            synchronized(this) {
-                val footer = buildString {
-                    appendLine("================================================================================")
-                    appendLine("Session ended at: ${isoFormat.format(Date())}")
-                    appendLine("================================================================================")
-                }
-                writer?.write(footer)
-                writer?.flush()
-                writer?.close()
-                writer = null
-            }
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-    }
-
     // ==================== 内部方法 ====================
 
     private fun cleanupOldLogs(retentionDays: Int) {

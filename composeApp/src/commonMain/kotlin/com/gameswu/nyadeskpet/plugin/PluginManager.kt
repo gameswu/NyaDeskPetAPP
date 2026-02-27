@@ -308,9 +308,5 @@ class PluginManager(private val configStorage: PluginConfigStorage) {
         return _plugins.value.values.find { it.manifest.name == name || it.manifest.id == name }
     }
 
-    fun getPluginsByCapability(capability: String): List<Plugin> {
-        return _plugins.value.values.filter { capability in it.manifest.capabilities }
-    }
-
     fun getAllPlugins(): List<Plugin> = _plugins.value.values.toList()
 }

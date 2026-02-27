@@ -49,7 +49,7 @@ private val OPENAI_TTS_VOICES = listOf(
 
 class OpenAITTSProvider(config: ProviderConfig) : TTSProvider(config) {
 
-    private val httpClient = HttpClient { expectSuccess = false }
+    private val httpClient = buildHttpClient()
 
     private val json = kotlinx.serialization.json.Json {
         ignoreUnknownKeys = true
@@ -122,17 +122,7 @@ class OpenAITTSProvider(config: ProviderConfig) : TTSProvider(config) {
         }
     }
 
-    private fun getMimeType(format: String?): String {
-        return when (format) {
-            "mp3" -> "audio/mpeg"
-            "opus" -> "audio/opus"
-            "aac" -> "audio/aac"
-            "flac" -> "audio/flac"
-            "wav" -> "audio/wav"
-            "pcm" -> "audio/pcm"
-            else -> "audio/mpeg"
-        }
-    }
+    private fun getMimeType(format: String?): String = audioFormatToMimeType(format)
 }
 
 // ==================== Provider 元信息 ====================

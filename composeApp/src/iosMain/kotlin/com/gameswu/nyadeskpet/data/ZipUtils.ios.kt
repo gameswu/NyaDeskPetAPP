@@ -1,5 +1,7 @@
 package com.gameswu.nyadeskpet.data
 
+import com.gameswu.nyadeskpet.util.DebugLog
+
 /**
  * iOS 实现 — 手动解析 PKZip 本地文件头。
  *
@@ -33,7 +35,7 @@ actual fun extractZipEntries(zipBytes: ByteArray): Map<String, ByteArray> {
             result[fileName] = data
         } else if (!fileName.endsWith("/")) {
             // Deflate 或其他压缩方式 — 跳过（技能 zip 建议使用无压缩模式）
-            println("[ZipUtils] 跳过压缩条目: $fileName (method=$compressionMethod)")
+            DebugLog.d("ZipUtils") { "跳过压缩条目: $fileName (method=$compressionMethod)" }
         }
 
         offset = dataStart + compressedSize

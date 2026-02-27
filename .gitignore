@@ -5,6 +5,8 @@
 xcuserdata
 !src/**/build/
 local.properties
+*.jks
+*.keystore
 .idea
 .DS_Store
 captures
@@ -17,6 +19,8 @@ captures
 !*.xcworkspace/contents.xcworkspacedata
 **/xcshareddata/WorkspaceSettings.xcsettings
 node_modules/
+**/release/
+**/debug/
 
 composeApp/src/androidMain/assets/models/live2d/nya/
 composeApp/src/androidMain/assets/models/asr/*/

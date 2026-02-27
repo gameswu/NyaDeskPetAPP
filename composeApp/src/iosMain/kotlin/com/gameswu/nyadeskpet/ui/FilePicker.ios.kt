@@ -7,7 +7,11 @@ import platform.UIKit.UIApplication
 import platform.UIKit.UIDocumentPickerViewController
 import platform.UIKit.UIDocumentPickerDelegateProtocol
 import platform.UniformTypeIdentifiers.UTType
+import platform.UniformTypeIdentifiers.UTTypeAudio
+import platform.UniformTypeIdentifiers.UTTypeImage
 import platform.UniformTypeIdentifiers.UTTypeItem
+import platform.UniformTypeIdentifiers.UTTypeMovie
+import platform.UniformTypeIdentifiers.UTTypeText
 import platform.darwin.NSObject
 import platform.posix.memcpy
 
@@ -24,14 +28,14 @@ actual fun rememberFilePickerLauncher(
     return {
         val types = mimeTypes.mapNotNull { mime ->
             when {
-                mime == "*/*" -> UTType.item
-                mime.startsWith("image/") -> UTType.image
-                mime.startsWith("video/") -> UTType.movie
-                mime.startsWith("audio/") -> UTType.audio
-                mime.startsWith("text/") -> UTType.text
-                else -> UTType.item
+                mime == "*/*" -> UTTypeItem
+                mime.startsWith("image/") -> UTTypeImage
+                mime.startsWith("video/") -> UTTypeMovie
+                mime.startsWith("audio/") -> UTTypeAudio
+                mime.startsWith("text/") -> UTTypeText
+                else -> UTTypeItem
             }
-        }.ifEmpty { listOf(UTType.item) }
+        }.ifEmpty { listOf(UTTypeItem) }
 
         val picker = UIDocumentPickerViewController(
             forOpeningContentTypes = types,

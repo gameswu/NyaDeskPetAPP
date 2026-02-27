@@ -47,6 +47,11 @@ class ChatViewModel(
     val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
 
     init {
+        // Wire lip sync: audio amplitude -> Live2D mouth animation
+        audioPlayer.setLipSyncCallback { value ->
+            live2dController.setLipSync(value)
+        }
+
         viewModelScope.launch {
             agentClient.connectionState.collect { state ->
                 _uiState.update { it.copy(connectionState = state) }
@@ -117,6 +122,9 @@ class ChatViewModel(
                 _uiState.update { it.copy(currentConversationId = convId) }
             }
         }
+
+        // 初始加载当前对话的历史消息
+        loadConversationMessages(builtinAgentService.currentConversationId.value)
     }
 
     fun onInputChanged(text: String) {
@@ -171,10 +179,6 @@ class ChatViewModel(
     fun connect() = agentClient.connect(settingsRepo.current.wsUrl)
     fun disconnect() = agentClient.disconnect()
 
-    fun hideSubtitle() {
-        _uiState.update { it.copy(isSubtitleVisible = false) }
-    }
-
     // ==================== 对话管理 ====================
 
     fun toggleConversationList() {
@@ -192,13 +196,15 @@ class ChatViewModel(
 
     fun switchConversation(conversationId: String) {
         if (builtinAgentService.switchConversation(conversationId)) {
-            _uiState.update { it.copy(messages = emptyList(), showConversationList = false) }
+            loadConversationMessages(conversationId)
+            _uiState.update { it.copy(showConversationList = false) }
         }
     }
 
     fun deleteConversation(conversationId: String) {
         builtinAgentService.deleteConversation(conversationId)
-        _uiState.update { it.copy(messages = emptyList()) }
+        // 删除后加载新的当前对话的消息
+        loadConversationMessages(builtinAgentService.currentConversationId.value)
     }
 
     private fun handleDialogueEvent(event: DialogueEvent) {
@@ -240,7 +246,7 @@ class ChatViewModel(
             is AudioEvent.Start -> {
                 audioPlayer.setVolume(settingsRepo.current.volume)
                 audioPlayer.startStream(event.data.mimeType)
-                event.data.text?.let { showSubtitle(it, event.data.totalDuration?.toLong() ?: 5000L) }
+                event.data.text?.let { showSubtitle(it, event.data.totalDuration ?: 5000L) }
             }
             is AudioEvent.Chunk -> audioPlayer.appendChunk(event.data.chunk)
             is AudioEvent.End -> audioPlayer.endStream()
@@ -249,6 +255,23 @@ class ChatViewModel(
 
     private fun appendMessage(msg: ChatMessage) {
         _uiState.update { old -> old.copy(messages = old.messages + msg) }
+    }
+
+    /**
+     * 从 ConversationManager 加载指定对话的历史消息并更新 UI 状态。
+     * 将 StoredMessage 转换为 UI 层 ChatMessage 。
+     */
+    private fun loadConversationMessages(conversationId: String) {
+        val storedMessages = builtinAgentService.getConversationMessages(conversationId)
+        val uiMessages = storedMessages
+            .filter { it.type != "command" && it.type != "system" }
+            .map { stored ->
+                ChatMessage(
+                    text = stored.content,
+                    isUser = stored.role == "user",
+                )
+            }
+        _uiState.update { it.copy(messages = uiMessages) }
     }
 
     private fun showSubtitle(text: String, durationMs: Long) {

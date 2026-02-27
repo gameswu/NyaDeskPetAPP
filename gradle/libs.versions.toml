@@ -1,20 +1,20 @@
 [versions]
 agp = "9.0.1"
-kotlin = "2.1.0"
-compose-multiplatform = "1.10.0"
-ktor = "3.0.3"
-sqldelight = "2.0.2"
-koin = "4.0.2"
-coroutines = "1.9.0"
-serialization = "1.7.3"
-coil = "3.0.4"
+kotlin = "2.3.10"
+compose-multiplatform = "1.10.1"
+ktor = "3.4.0"
+sqldelight = "2.2.1"
+koin = "4.1.1"
+coroutines = "1.10.2"
+serialization = "1.10.0"
+coil = "3.3.0"
 lifecycle = "2.9.6"
-navigation = "2.8.0-alpha11"
-multiplatformMarkdown = "0.28.0"
+navigation = "2.9.2"
+multiplatformMarkdown = "0.39.2"
 android-compileSdk = "36"
 android-minSdk = "26"
 android-targetSdk = "36"
-androidx-activity = "1.12.2"
+androidx-activity = "1.12.4"
 androidx-appcompat = "1.7.1"
 androidx-core = "1.17.0"
 androidx-espresso = "3.7.0"
@@ -72,11 +72,11 @@ multiplatform-markdown = { module = "com.mikepenz:multiplatform-markdown-rendere
 multiplatform-markdown-m3 = { module = "com.mikepenz:multiplatform-markdown-renderer-m3", version.ref = "multiplatformMarkdown" }
 
 # Android 特有
-androidx-media3-exoplayer = { module = "androidx.media3:media3-exoplayer", version = "1.5.1" }
-androidx-camera-core = { module = "androidx.camera:camera-core", version = "1.4.1" }
-androidx-camera-camera2 = { module = "androidx.camera:camera-camera2", version = "1.4.1" }
-androidx-camera-lifecycle = { module = "androidx.camera:camera-lifecycle", version = "1.4.1" }
-androidx-camera-view = { module = "androidx.camera:camera-view", version = "1.4.1" }
+androidx-media3-exoplayer = { module = "androidx.media3:media3-exoplayer", version = "1.9.2" }
+androidx-camera-core = { module = "androidx.camera:camera-core", version = "1.5.3" }
+androidx-camera-camera2 = { module = "androidx.camera:camera-camera2", version = "1.5.3" }
+androidx-camera-lifecycle = { module = "androidx.camera:camera-lifecycle", version = "1.5.3" }
+androidx-camera-view = { module = "androidx.camera:camera-view", version = "1.5.3" }
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "androidx-activity" }
 androidx-core-ktx = { module = "androidx.core:core-ktx", version.ref = "androidx-core" }
 androidx-appcompat = { module = "androidx.appcompat:appcompat", version.ref = "androidx-appcompat" }

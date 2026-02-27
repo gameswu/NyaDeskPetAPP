@@ -1,0 +1,12 @@
+# Kotlin/Native cinterop definition for Live2D rendering bridge.
+# Binds Live2DBridge.h (C API) which wraps Cubism Core + OpenGL ES rendering.
+# Static libraries for Cubism Core + bridge compiled per-target via Gradle.
+
+headers = Live2DBridge.h
+headerFilter = Live2DBridge.h
+
+# staticLibraries and libraryPaths are set per-target in build.gradle.kts
+staticLibraries = libLive2DCubismCore.a libLive2DBridge.a
+
+# Linker flags: link OpenGLES, GLKit, UIKit frameworks + C++ standard library
+linkerOpts = -framework OpenGLES -framework GLKit -framework UIKit -framework CoreGraphics -lc++

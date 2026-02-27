@@ -13,6 +13,11 @@ import kotlin.math.max
 class Live2DController(private val manager: Live2DManager) {
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
+    /** 销毁时取消所有挂起的协程动画 */
+    fun destroy() {
+        scope.cancel()
+    }
+
     /**
      * Handles a single Live2D command.
      */
@@ -83,6 +88,13 @@ class Live2DController(private val manager: Live2DManager) {
                 }
             }
         }
+    }
+
+    /**
+     * Sets the lip-sync value, delegating to the underlying Live2D manager.
+     */
+    fun setLipSync(value: Float) {
+        manager.setLipSync(value)
     }
 
     /**

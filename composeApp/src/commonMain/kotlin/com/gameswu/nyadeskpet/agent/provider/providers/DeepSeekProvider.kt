@@ -29,6 +29,7 @@ val DEEPSEEK_METADATA = ProviderMetadata(
         ProviderConfigField(key = "baseUrl", label = "API Base URL", type = "string", default = "https://api.deepseek.com", placeholder = "https://api.deepseek.com", description = "DeepSeek API 地址，通常无需修改"),
         ProviderConfigField(key = "model", label = "模型", type = "string", default = "deepseek-chat", placeholder = "deepseek-chat", description = "模型 ID，如 deepseek-chat 或 deepseek-reasoner"),
         ProviderConfigField(key = "timeout", label = "超时时间（秒）", type = "number", default = "60", description = "请求超时时间"),
+        ProviderConfigField(key = "proxy", label = "代理地址", type = "string", placeholder = "http://127.0.0.1:7890", description = "HTTP/HTTPS 代理（如需使用）"),
         ProviderConfigField(key = "stream", label = "流式输出", type = "boolean", default = "false", description = "启用后 LLM 回复将逐字流式显示"),
     ) + PROVIDER_CAPABILITY_FIELDS,
 )

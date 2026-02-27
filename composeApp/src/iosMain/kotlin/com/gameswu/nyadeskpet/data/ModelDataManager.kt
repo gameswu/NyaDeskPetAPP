@@ -1,3 +1,5 @@
+@file:OptIn(kotlinx.cinterop.ExperimentalForeignApi::class)
+
 package com.gameswu.nyadeskpet.data
 
 import com.gameswu.nyadeskpet.PlatformContext
@@ -29,21 +31,45 @@ actual class ModelDataManager actual constructor(private val context: PlatformCo
 
     actual fun ensureBuiltinModels(): Boolean {
         val fm = NSFileManager.defaultManager
-        val marker = "$modelsDir/.initialized"
-        if (fm.fileExistsAtPath(marker)) return false
-
-        // 从 Bundle 中复制模型到 Documents/models/
-        val bundlePath = NSBundle.mainBundle.resourcePath ?: return false
+        val bundlePath = NSBundle.mainBundle.resourcePath ?: run {
+            println("[ModelDataManager] resourcePath is null")
+            return false
+        }
         val sourceDir = "$bundlePath/models"
 
-        if (fm.fileExistsAtPath(sourceDir)) {
-            if (!fm.fileExistsAtPath(modelsDir)) {
-                fm.copyItemAtPath(sourceDir, toPath = modelsDir, error = null)
-            } else {
-                // 目录已部分存在，逐项复制
-                copyDirRecursive(fm, sourceDir, modelsDir)
-            }
+        println("[ModelDataManager] Bundle resourcePath: $bundlePath")
+        println("[ModelDataManager] Looking for models in: $sourceDir")
+        println("[ModelDataManager] Source exists: ${fm.fileExistsAtPath(sourceDir)}")
+
+        // Bundle 中没有 models 目录则跳过（避免误设标记）
+        if (!fm.fileExistsAtPath(sourceDir)) {
+            // 列出 Bundle 根目录内容以供诊断
+            val bundleContents = fm.contentsOfDirectoryAtPath(bundlePath, error = null)
+            println("[ModelDataManager] Bundle root contents: $bundleContents")
+            return false
         }
+
+        // 用 Bundle 版本号作为标记，App 更新后自动重新复制
+        val bundleVersion = NSBundle.mainBundle.objectForInfoDictionaryKey("CFBundleVersion") as? String ?: "1"
+        val marker = "$modelsDir/.initialized_v$bundleVersion"
+
+        if (fm.fileExistsAtPath(marker)) {
+            println("[ModelDataManager] Already initialized for version $bundleVersion")
+            return false
+        }
+
+        // 确保 models 目录存在
+        if (!fm.fileExistsAtPath(modelsDir)) {
+            fm.createDirectoryAtPath(modelsDir, withIntermediateDirectories = true, attributes = null, error = null)
+        }
+
+        // 从 Bundle 递归复制模型到 Documents/models/
+        println("[ModelDataManager] Copying models from Bundle to Documents...")
+        copyDirRecursive(fm, sourceDir, modelsDir)
+
+        // 验证复制结果
+        val targetFile = "$modelsDir/live2d/mao_pro_zh/runtime/mao_pro.model3.json"
+        println("[ModelDataManager] Copy done. Target file exists: ${fm.fileExistsAtPath(targetFile)}")
 
         fm.createFileAtPath(marker, contents = null, attributes = null)
         return true
@@ -58,15 +84,17 @@ actual class ModelDataManager actual constructor(private val context: PlatformCo
     actual fun clearModelCache(): Boolean {
         val fm = NSFileManager.defaultManager
         return try {
-            // 删除 .initialized 标记
-            val marker = "$modelsDir/.initialized"
-            if (fm.fileExistsAtPath(marker)) {
-                fm.removeItemAtPath(marker, error = null)
-            }
-            // 删除 models 目录下所有内容
+            // 删除所有 .initialized* 标记文件（含版本化标记 .initialized_vX）
             val contents = fm.contentsOfDirectoryAtPath(modelsDir, error = null)
             @Suppress("UNCHECKED_CAST")
-            val items = (contents as? List<String>) ?: emptyList()
+            val markers = (contents as? List<String>)?.filter { it.startsWith(".initialized") } ?: emptyList()
+            for (marker in markers) {
+                fm.removeItemAtPath("$modelsDir/$marker", error = null)
+            }
+            // 删除 models 目录下所有内容
+            val remaining = fm.contentsOfDirectoryAtPath(modelsDir, error = null)
+            @Suppress("UNCHECKED_CAST")
+            val items = (remaining as? List<String>) ?: emptyList()
             for (item in items) {
                 fm.removeItemAtPath("$modelsDir/$item", error = null)
             }
@@ -89,7 +117,7 @@ actual class ModelDataManager actual constructor(private val context: PlatformCo
         return try {
             val url = NSURL(string = "shareddocuments://")
             if (UIApplication.sharedApplication.canOpenURL(url)) {
-                UIApplication.sharedApplication.openURL(url)
+                UIApplication.sharedApplication.openURL(url, emptyMap<Any?, Any>(), null)
                 true
             } else {
                 false
@@ -125,7 +153,12 @@ actual class ModelDataManager actual constructor(private val context: PlatformCo
         for (item in items) {
             val srcPath = "$src/$item"
             val dstPath = "$dst/$item"
-            if (!fm.fileExistsAtPath(dstPath)) {
+            // 用文件属性判断是否为目录
+            val attrs = fm.attributesOfItemAtPath(srcPath, error = null)
+            val fileType = attrs?.get(NSFileType) as? String
+            if (fileType == NSFileTypeDirectory) {
+                copyDirRecursive(fm, srcPath, dstPath)
+            } else if (!fm.fileExistsAtPath(dstPath)) {
                 fm.copyItemAtPath(srcPath, toPath = dstPath, error = null)
             }
         }

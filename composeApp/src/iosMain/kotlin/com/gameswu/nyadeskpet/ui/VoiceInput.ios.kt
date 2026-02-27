@@ -1,3 +1,5 @@
+@file:OptIn(kotlinx.cinterop.ExperimentalForeignApi::class)
+
 package com.gameswu.nyadeskpet.ui
 
 import androidx.compose.runtime.*
@@ -41,17 +43,14 @@ actual fun rememberVoiceInput(
     }
 
     return VoiceInputController(
-        isAvailable = recognizer?.isAvailable() ?: false,
+        isAvailable = recognizer.isAvailable(),
         isListening = isListening,
         startListening = {
             if (isListening) return@VoiceInputController
-            val rec = recognizer ?: run {
-                onError("语音识别不可用")
-                return@VoiceInputController
-            }
+            val rec = recognizer
 
             SFSpeechRecognizer.requestAuthorization { status ->
-                if (status != SFSpeechRecognizerAuthorizationStatusAuthorized) {
+                if (status != SFSpeechRecognizerAuthorizationStatus.SFSpeechRecognizerAuthorizationStatusAuthorized) {
                     onError("语音识别权限被拒绝")
                     return@requestAuthorization
                 }

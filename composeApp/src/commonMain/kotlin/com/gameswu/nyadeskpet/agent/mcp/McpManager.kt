@@ -4,6 +4,7 @@ import com.gameswu.nyadeskpet.plugin.PluginManager
 import com.gameswu.nyadeskpet.plugin.api.ToolDefinition
 import com.gameswu.nyadeskpet.plugin.api.ToolProvider
 import com.gameswu.nyadeskpet.plugin.api.ToolResult
+import com.gameswu.nyadeskpet.util.DebugLog
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -61,7 +62,7 @@ class McpManager(
                     try {
                         connectServer(config.name)
                     } catch (e: Exception) {
-                        println("[McpManager] 自动连接失败: ${config.name} - ${e.message}")
+                        DebugLog.w("McpManager") { "自动连接失败: ${config.name} - ${e.message}" }
                     }
                 }
             }

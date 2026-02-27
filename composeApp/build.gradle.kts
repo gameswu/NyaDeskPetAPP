@@ -42,7 +42,120 @@ val generateBuildConfig by tasks.registering {
     }
 }
 
+// ==================== iOS Live2D 静态库自动编译 ====================
+// 将 Live2DBridge.cpp + stb_impl_ios.c 编译为 libLive2DBridge.a，
+// 按 iOS target 架构分别输出到对应 lib/ 目录。
+// 这些 Task 会作为 cinterop 的前置依赖自动执行。
+
+data class IosBuildTarget(
+    val name: String,          // Gradle target name (iosArm64, iosX64, iosSimulatorArm64)
+    val sdk: String,           // iphoneos / iphonesimulator
+    val clangTarget: String,   // arm64-apple-ios15.0 etc.
+    val libDir: String         // output directory under live2d/lib/
+)
+
+val iosBuildTargets = listOf(
+    IosBuildTarget("iosArm64",          "iphoneos",        "arm64-apple-ios15.0",              "lib/ios-arm64"),
+    IosBuildTarget("iosX64",            "iphonesimulator", "x86_64-apple-ios15.0-simulator",   "lib/ios-x64"),
+    IosBuildTarget("iosSimulatorArm64", "iphonesimulator", "arm64-apple-ios15.0-simulator",    "lib/ios-simulator-arm64"),
+)
+
+val live2dSrcDir  = project.file("src/nativeInterop/cinterop/live2d")
+val live2dIncDir  = project.file("src/nativeInterop/cinterop/live2d/include")
+val cppSource     = live2dSrcDir.resolve("live2DBridge.cpp")
+val cSource       = live2dSrcDir.resolve("stb_impl_ios.c")
+
+// 为每个 iOS target 注册编译 Task
+val buildLive2dBridgeTasks = iosBuildTargets.associate { target ->
+    val taskName = "buildLive2dBridge_${target.name}"
+    val outputLibPath = live2dSrcDir.resolve("${target.libDir}/libLive2DBridge.a").absolutePath
+    val buildDirPath  = layout.buildDirectory.dir("live2dBridge/${target.name}").get().asFile.absolutePath
+    val incDirPath    = live2dIncDir.absolutePath
+    val cppSourcePath = cppSource.absolutePath
+    val cSourcePath   = cSource.absolutePath
+    // 提取纯字符串，避免 configuration cache 序列化问题
+    val sdkName       = target.sdk
+    val clangTgt      = target.clangTarget
+    val targetLabel   = target.name
+
+    target.name to tasks.register(taskName) {
+        group = "live2d"
+        description = "Compile Live2DBridge static library for $targetLabel"
+
+        inputs.files(cppSourcePath, cSourcePath)
+        inputs.dir(incDirPath)
+        outputs.file(outputLibPath)
+
+        onlyIf {
+            // 检查 Xcode SDK 是否可用（没有完整 Xcode 时跳过）
+            val sdkCheck = try {
+                val p = ProcessBuilder("xcrun", "--sdk", sdkName, "--show-sdk-path")
+                    .redirectErrorStream(true).start()
+                p.waitFor() == 0
+            } catch (_: Exception) { false }
+
+            if (!sdkCheck) {
+                logger.warn("⚠️ iOS SDK '$sdkName' not found — skipping $targetLabel bridge build. Install Xcode to enable.")
+                false
+            } else {
+                val outFile = File(outputLibPath)
+                val cppFile = File(cppSourcePath)
+                val cFile   = File(cSourcePath)
+                !outFile.exists() || cppFile.lastModified() > outFile.lastModified()
+                        || cFile.lastModified() > outFile.lastModified()
+            }
+        }
+
+        doLast {
+            File(buildDirPath).mkdirs()
+            File(outputLibPath).parentFile.mkdirs()
+
+            fun runCmd(vararg args: String) {
+                val proc = ProcessBuilder(args.toList())
+                    .redirectErrorStream(true)
+                    .start()
+                val output = proc.inputStream.bufferedReader().readText()
+                val code = proc.waitFor()
+                if (code != 0) {
+                    throw GradleException("Command failed (exit $code): ${args.joinToString(" ")}\n$output")
+                }
+            }
+
+            // 编译 Live2DBridge.cpp
+            runCmd(
+                "xcrun", "-sdk", sdkName, "clang++",
+                "-std=c++17", "-c", "-O2",
+                "-target", clangTgt,
+                "-I$incDirPath",
+                "-o", "$buildDirPath/Live2DBridge.o",
+                cppSourcePath
+            )
+            // 编译 stb_impl_ios.c
+            runCmd(
+                "xcrun", "-sdk", sdkName, "clang",
+                "-c", "-O2",
+                "-target", clangTgt,
+                "-I$incDirPath",
+                "-o", "$buildDirPath/stb_impl_ios.o",
+                cSourcePath
+            )
+            // 打包为静态库
+            runCmd(
+                "ar", "rcs", outputLibPath,
+                "$buildDirPath/Live2DBridge.o",
+                "$buildDirPath/stb_impl_ios.o"
+            )
+            logger.lifecycle("✅ Built libLive2DBridge.a for $targetLabel")
+        }
+    }
+}
+
 kotlin {
+    // Suppress "expect/actual classes are in Beta" warnings project-wide
+    compilerOptions {
+        freeCompilerArgs.add("-Xexpect-actual-classes")
+    }
+
     androidTarget {
         compilerOptions {
             jvmTarget.set(JvmTarget.JVM_17)
@@ -54,9 +167,37 @@ kotlin {
         iosArm64(),
         iosSimulatorArm64()
     ).forEach { iosTarget ->
+        val libDir = iosBuildTargets.first { it.name == iosTarget.name }.libDir
+        val libPath = project.file("src/nativeInterop/cinterop/live2d/$libDir").absolutePath
+
         iosTarget.binaries.framework {
             baseName = "ComposeApp"
             isStatic = true
+            binaryOption("bundleId", "com.gameswu.nyadeskpet")
+            // Xcode 26+ splits SwiftUICore into a restricted private framework;
+            // use the classic linker to avoid "not an allowed client" TBD errors.
+            linkerOpts("-ld64")
+        }
+
+        // Live2D cinterop — bind C bridge API + Cubism Core static library
+        iosTarget.compilations.getByName("main") {
+            cinterops {
+                val live2d by creating {
+                    defFile(project.file("src/nativeInterop/cinterop/live2d.def"))
+                    includeDirs(project.file("src/nativeInterop/cinterop/live2d/include"))
+
+                    // Per-target library paths
+                    val libDir = iosBuildTargets.first { it.name == iosTarget.name }.libDir
+                    extraOpts("-libraryPath", project.file("src/nativeInterop/cinterop/live2d/$libDir").absolutePath)
+                }
+            }
+
+            // 让 cinterop Task 依赖静态库编译 Task
+            val buildTask = buildLive2dBridgeTasks[iosTarget.name]
+            if (buildTask != null) {
+                tasks.matching { it.name.startsWith("cinteropLive2d${iosTarget.name.replaceFirstChar { c -> c.uppercase() }}") }
+                    .configureEach { dependsOn(buildTask) }
+            }
         }
     }
 

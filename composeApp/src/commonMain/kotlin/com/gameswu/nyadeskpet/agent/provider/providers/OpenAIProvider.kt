@@ -10,6 +10,7 @@
 package com.gameswu.nyadeskpet.agent.provider.providers
 
 import com.gameswu.nyadeskpet.agent.provider.*
+import com.gameswu.nyadeskpet.util.DebugLog
 import io.ktor.client.*
 import io.ktor.client.request.*
 import io.ktor.client.statement.*
@@ -155,13 +156,14 @@ internal data class OaiError(
  */
 open class OpenAIProvider(config: ProviderConfig) : LLMProvider(config) {
 
-    protected val httpClient = HttpClient { expectSuccess = false }
+    protected val httpClient = buildHttpClient()
     protected var cachedModels: List<String> = emptyList()
 
     protected val json = Json {
         ignoreUnknownKeys = true
         isLenient = true
-        encodeDefaults = false
+        encodeDefaults = true   // 确保 ToolDefinitionSchema.type="function" 总是被序列化
+        explicitNulls = false   // null 字段不输出到 JSON，避免 API 不兼容
     }
 
     override fun getMetadata(): ProviderMetadata = OPENAI_METADATA
@@ -317,6 +319,8 @@ open class OpenAIProvider(config: ProviderConfig) : LLMProvider(config) {
             ),
         )
 
+        DebugLog.d("OpenAIProvider") { "chat() → $baseUrl/chat/completions, model=$model" }
+
         return try {
             val response = httpClient.post("$baseUrl/chat/completions") {
                 apiKey?.let { header("Authorization", "Bearer $it") }
@@ -325,13 +329,16 @@ open class OpenAIProvider(config: ProviderConfig) : LLMProvider(config) {
             }
 
             val bodyText = response.bodyAsText()
+            DebugLog.d("OpenAIProvider") { "chat() HTTP ${response.status.value}, body=${bodyText.take(200)}" }
 
             if (!response.status.isSuccess()) {
                 val errorResp = try {
                     json.decodeFromString(OaiErrorResponse.serializer(), bodyText)
                 } catch (_: Exception) { null }
+                val errorMsg = errorResp?.error?.message ?: "HTTP ${response.status.value}: ${bodyText.take(500)}"
+                DebugLog.w("OpenAIProvider") { "chat() 错误: $errorMsg" }
                 return LLMResponse(
-                    text = errorResp?.error?.message ?: "HTTP ${response.status.value}: $bodyText",
+                    text = errorMsg,
                     finishReason = "error",
                 )
             }
@@ -351,11 +358,12 @@ open class OpenAIProvider(config: ProviderConfig) : LLMProvider(config) {
                 },
             )
         } catch (e: Exception) {
+            DebugLog.e("OpenAIProvider") { "chat() 异常: ${e.message}" }
             LLMResponse(text = "请求失败: ${e.message}", finishReason = "error")
         }
     }
 
-    // ==================== 流式聊天 ====================
+    // ==================== 流式聊天 ==
 
     override suspend fun chatStream(request: LLMRequest, onChunk: suspend (LLMStreamChunk) -> Unit) {
         val baseUrl = getConfigValue("baseUrl", "https://api.openai.com/v1")
@@ -375,6 +383,8 @@ open class OpenAIProvider(config: ProviderConfig) : LLMProvider(config) {
             ),
         )
 
+        DebugLog.d("OpenAIProvider") { "chatStream() → $baseUrl/chat/completions, model=$model" }
+
         try {
             val statement = httpClient.preparePost("$baseUrl/chat/completions") {
                 apiKey?.let { header("Authorization", "Bearer $it") }
@@ -383,79 +393,74 @@ open class OpenAIProvider(config: ProviderConfig) : LLMProvider(config) {
             }
 
             statement.execute { response ->
+                DebugLog.d("OpenAIProvider") { "chatStream() HTTP ${response.status.value}" }
                 if (!response.status.isSuccess()) {
                     val bodyText = response.bodyAsText()
                     val errorResp = try {
                         json.decodeFromString(OaiErrorResponse.serializer(), bodyText)
                     } catch (_: Exception) { null }
+                    val errorMsg = errorResp?.error?.message ?: "HTTP ${response.status.value}: ${bodyText.take(500)}"
+                    DebugLog.w("OpenAIProvider") { "chatStream() 错误: $errorMsg" }
                     onChunk(LLMStreamChunk(
-                        delta = errorResp?.error?.message ?: "HTTP ${response.status.value}: $bodyText",
+                        delta = errorMsg,
                         done = true,
                     ))
                     return@execute
                 }
 
                 val channel: ByteReadChannel = response.bodyAsChannel()
-                val lineBuffer = StringBuilder()
 
+                // 使用 readLine 正确处理多字节 UTF-8 字符（如中文）
                 while (!channel.isClosedForRead) {
-                    val byte = try {
-                        channel.readByte()
+                    val line = try {
+                        channel.readLine()
                     } catch (_: Exception) {
-                        break
-                    }
+                        null
+                    } ?: break
 
-                    val char = byte.toInt().toChar()
-                    if (char == '\n') {
-                        val line = lineBuffer.toString()
-                        lineBuffer.clear()
+                    if (line.startsWith("data: ")) {
+                        val data = line.removePrefix("data: ").trim()
+                        if (data == "[DONE]") {
+                            onChunk(LLMStreamChunk(delta = "", done = true))
+                            return@execute
+                        }
 
-                        if (line.startsWith("data: ")) {
-                            val data = line.removePrefix("data: ").trim()
-                            if (data == "[DONE]") {
-                                onChunk(LLMStreamChunk(delta = "", done = true))
+                        try {
+                            val chunk = json.decodeFromString(OaiChatChunk.serializer(), data)
+                            val delta = chunk.choices.firstOrNull()?.delta
+                            val choiceFinishReason = chunk.choices.firstOrNull()?.finishReason
+
+                            if (delta != null) {
+                                val toolCallDeltas = delta.toolCalls?.map { tc ->
+                                    ToolCallDelta(
+                                        index = tc.index,
+                                        id = tc.id,
+                                        name = tc.function?.name,
+                                        arguments = tc.function?.arguments,
+                                    )
+                                }
+
+                                onChunk(LLMStreamChunk(
+                                    delta = delta.content ?: "",
+                                    done = false,
+                                    reasoningDelta = delta.reasoningContent,
+                                    finishReason = choiceFinishReason,
+                                    toolCallDeltas = toolCallDeltas,
+                                ))
+                            }
+
+                            // 最后一个 chunk 可能包含 usage
+                            if (chunk.usage != null) {
+                                onChunk(LLMStreamChunk(
+                                    delta = "",
+                                    done = true,
+                                    usage = convertUsage(chunk.usage),
+                                ))
                                 return@execute
                             }
-
-                            try {
-                                val chunk = json.decodeFromString(OaiChatChunk.serializer(), data)
-                                val delta = chunk.choices.firstOrNull()?.delta
-                                val choiceFinishReason = chunk.choices.firstOrNull()?.finishReason
-
-                                if (delta != null) {
-                                    val toolCallDeltas = delta.toolCalls?.map { tc ->
-                                        ToolCallDelta(
-                                            index = tc.index,
-                                            id = tc.id,
-                                            name = tc.function?.name,
-                                            arguments = tc.function?.arguments,
-                                        )
-                                    }
-
-                                    onChunk(LLMStreamChunk(
-                                        delta = delta.content ?: "",
-                                        done = false,
-                                        reasoningDelta = delta.reasoningContent,
-                                        finishReason = choiceFinishReason,
-                                        toolCallDeltas = toolCallDeltas,
-                                    ))
-                                }
-
-                                // 最后一个 chunk 可能包含 usage
-                                if (chunk.usage != null) {
-                                    onChunk(LLMStreamChunk(
-                                        delta = "",
-                                        done = true,
-                                        usage = convertUsage(chunk.usage),
-                                    ))
-                                    return@execute
-                                }
-                            } catch (_: Exception) {
-                                // 忽略解析错误
-                            }
+                        } catch (_: Exception) {
+                            // 忽略解析错误
                         }
-                    } else {
-                        lineBuffer.append(char)
                     }
                 }
 
@@ -463,6 +468,7 @@ open class OpenAIProvider(config: ProviderConfig) : LLMProvider(config) {
                 onChunk(LLMStreamChunk(delta = "", done = true))
             }
         } catch (e: Exception) {
+            DebugLog.e("OpenAIProvider") { "chatStream() 异常: ${e.message}" }
             onChunk(LLMStreamChunk(delta = "流式请求失败: ${e.message}", done = true))
         }
     }

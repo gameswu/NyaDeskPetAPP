@@ -171,19 +171,6 @@ class ConversationManager(private val storage: ConversationStorage) {
         save()
     }
 
-    /** 清除所有对话 */
-    fun clearAll() {
-        data = PersistedData()
-        ensureDefaultConversation()
-        save()
-    }
-
-    /** 重命名对话 */
-    fun renameConversation(conversationId: String, newTitle: String) {
-        updateConversationTitle(conversationId, newTitle)
-        save()
-    }
-
     // ==================== 内部方法 ====================
 
     private fun updateConversationTitle(convId: String, title: String) {

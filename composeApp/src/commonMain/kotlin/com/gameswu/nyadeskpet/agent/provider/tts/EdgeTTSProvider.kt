@@ -14,6 +14,7 @@
 package com.gameswu.nyadeskpet.agent.provider.tts
 
 import com.gameswu.nyadeskpet.agent.provider.*
+import com.gameswu.nyadeskpet.formatUtcDate
 import io.ktor.client.*
 import io.ktor.client.plugins.websocket.*
 import io.ktor.http.*
@@ -82,9 +83,19 @@ private val EDGE_TTS_VOICES = listOf(
  */
 class EdgeTTSProvider(config: ProviderConfig) : TTSProvider(config) {
 
-    private val httpClient = HttpClient {
+    companion object {
+        private const val WSS_BASE_URL =
+            "wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1"
+        private const val TRUSTED_CLIENT_TOKEN = "6A5AA1D4EAFF4E9FB37E23D68491D6F4"
+        private const val CHROME_EXTENSION_ORIGIN =
+            "chrome-extension://jdiccldimpdaibmpdkjnbmckianbfold"
+        private const val EDGE_USER_AGENT =
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 Edg/130.0.0.0"
+        private const val AUDIO_OUTPUT_FORMAT = "audio-24khz-48kbitrate-mono-mp3"
+    }
+
+    private val httpClient = buildHttpClient {
         install(WebSockets)
-        expectSuccess = false
     }
 
     override fun getMetadata(): ProviderMetadata = EDGE_TTS_METADATA
@@ -113,13 +124,13 @@ class EdgeTTSProvider(config: ProviderConfig) : TTSProvider(config) {
 
         withTimeout(timeoutSec * 1000L) {
             httpClient.webSocket(
-                urlString = "wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1" +
-                    "?TrustedClientToken=6A5AA1D4EAFF4E9FB37E23D68491D6F4" +
+                urlString = "$WSS_BASE_URL" +
+                    "?TrustedClientToken=$TRUSTED_CLIENT_TOKEN" +
                     "&ConnectionId=$requestId",
                 request = {
                     headers {
-                        append(HttpHeaders.Origin, "chrome-extension://jdiccldimpdaibmpdkjnbmckianbfold")
-                        append(HttpHeaders.UserAgent, "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 Edg/130.0.0.0")
+                        append(HttpHeaders.Origin, CHROME_EXTENSION_ORIGIN)
+                        append(HttpHeaders.UserAgent, EDGE_USER_AGENT)
                     }
                 },
             ) {
@@ -127,7 +138,7 @@ class EdgeTTSProvider(config: ProviderConfig) : TTSProvider(config) {
                 val configMessage = "X-Timestamp:${getTimestamp()}\r\n" +
                     "Content-Type:application/json; charset=utf-8\r\n" +
                     "Path:speech.config\r\n\r\n" +
-                    """{"context":{"synthesis":{"audio":{"metadataoptions":{"sentenceBoundaryEnabled":"false","wordBoundaryEnabled":"false"},"outputFormat":"audio-24khz-48kbitrate-mono-mp3"}}}}"""
+                    """{"context":{"synthesis":{"audio":{"metadataoptions":{"sentenceBoundaryEnabled":"false","wordBoundaryEnabled":"false"},"outputFormat":"$AUDIO_OUTPUT_FORMAT"}}}}"""
                 send(Frame.Text(configMessage))
 
                 // 2. 发送 SSML 消息
@@ -221,8 +232,7 @@ class EdgeTTSProvider(config: ProviderConfig) : TTSProvider(config) {
     }
 
     private fun getTimestamp(): String {
-        // 简化版 UTC 时间戳
-        return "Thu Feb 20 2026 00:00:00 GMT+0000"
+        return formatUtcDate()
     }
 }
 

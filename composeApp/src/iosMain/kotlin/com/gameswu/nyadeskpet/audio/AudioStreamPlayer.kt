@@ -1,6 +1,9 @@
+@file:OptIn(kotlinx.cinterop.ExperimentalForeignApi::class, kotlinx.cinterop.BetaInteropApi::class)
+
 package com.gameswu.nyadeskpet.audio
 
 import com.gameswu.nyadeskpet.PlatformContext
+import com.gameswu.nyadeskpet.util.DebugLog
 import kotlinx.cinterop.*
 import platform.AVFAudio.*
 import platform.Foundation.*
@@ -53,7 +56,7 @@ actual class AudioStreamPlayer actual constructor(private val context: PlatformC
 
         // 创建并播放
         try {
-            val audioPlayer = AVAudioPlayer(contentsOfURL = fileUrl)
+            val audioPlayer = AVAudioPlayer(contentsOfURL = fileUrl, error = null)
             audioPlayer.volume = currentVolume
             audioPlayer.meteringEnabled = true
             audioPlayer.prepareToPlay()
@@ -63,7 +66,7 @@ actual class AudioStreamPlayer actual constructor(private val context: PlatformC
             // 启动唇形同步监控
             startLipSyncMonitoring()
         } catch (e: Exception) {
-            println("AudioStreamPlayer: Error playing audio: ${e.message}")
+            DebugLog.e("AudioStreamPlayer") { "Error playing audio: ${e.message}" }
         }
     }
 

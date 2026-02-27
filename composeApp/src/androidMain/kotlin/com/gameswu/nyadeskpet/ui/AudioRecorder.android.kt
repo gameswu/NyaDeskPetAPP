@@ -24,6 +24,7 @@ actual class AudioRecorder actual constructor() {
         const val SAMPLE_RATE = 16000
         const val CHANNEL_CONFIG = AudioFormat.CHANNEL_IN_MONO
         const val AUDIO_FORMAT = AudioFormat.ENCODING_PCM_16BIT
+        private const val THREAD_JOIN_TIMEOUT_MS = 2000L
     }
 
     private val _state = MutableStateFlow(RecorderState.IDLE)
@@ -112,7 +113,7 @@ actual class AudioRecorder actual constructor() {
         isRecording = false
 
         try {
-            recordingThread?.join(2000)
+            recordingThread?.join(THREAD_JOIN_TIMEOUT_MS)
         } catch (_: InterruptedException) {
             // ignore
         }
@@ -137,7 +138,7 @@ actual class AudioRecorder actual constructor() {
     actual fun cancelRecording() {
         isRecording = false
         try {
-            recordingThread?.join(2000)
+            recordingThread?.join(THREAD_JOIN_TIMEOUT_MS)
         } catch (_: InterruptedException) {
             // ignore
         }

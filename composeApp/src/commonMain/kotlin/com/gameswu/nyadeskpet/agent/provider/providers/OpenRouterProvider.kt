@@ -53,10 +53,14 @@ internal data class OpenRouterModelsResponse(
 
 class OpenRouterProvider(config: ProviderConfig) : OpenAIProvider(
     config.copy(
-        baseUrl = "https://openrouter.ai/api/v1", // 强制使用 OpenRouter URL
+        baseUrl = DEFAULT_BASE_URL, // 强制使用 OpenRouter URL
         model = config.model ?: "openai/gpt-4o-mini",
     )
 ) {
+    companion object {
+        private const val DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
+    }
+
     /** 缓存的模型详细信息 */
     private var openRouterModels: List<OpenRouterModel> = emptyList()
 
@@ -68,7 +72,7 @@ class OpenRouterProvider(config: ProviderConfig) : OpenAIProvider(
     override suspend fun getModels(): List<String> {
         if (openRouterModels.isNotEmpty()) return openRouterModels.map { it.id }
 
-        val baseUrl = "https://openrouter.ai/api/v1"
+        val baseUrl = DEFAULT_BASE_URL
         val apiKey = getConfigValue<String?>("apiKey", null)
 
         val response = httpClient.get("$baseUrl/models") {

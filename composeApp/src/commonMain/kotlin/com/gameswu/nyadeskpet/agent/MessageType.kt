@@ -259,14 +259,6 @@ data class PluginResponseData(
     val timestamp: Long? = null
 )
 
-@Serializable
-data class PluginMessageData(
-    val pluginId: String,
-    val pluginName: String? = null,
-    val text: String,
-    val metadata: JsonObject? = null
-)
-
 // ===== 工具状态 =====
 @Serializable
 data class ToolStatusData(

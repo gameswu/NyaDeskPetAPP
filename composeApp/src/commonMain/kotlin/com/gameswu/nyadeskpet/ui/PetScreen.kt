@@ -8,7 +8,7 @@ import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.OpenInNew
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -177,7 +177,14 @@ fun PetScreen(viewModel: ChatViewModel = koinViewModel()) {
                                         else -> "Body"
                                     }
                                 }
-                                scope.launch { agentClient.sendTapEvent(hitArea, nx, ny) }
+                                scope.launch {
+                                    // 检查触碰区域是否已在设置中禁用
+                                    val modelTapConfigs = settings.tapConfigs[settings.modelPath] ?: emptyMap()
+                                    val areaConfig = modelTapConfigs[hitArea]
+                                    if (areaConfig == null || areaConfig.enabled) {
+                                        agentClient.sendTapEvent(hitArea, nx, ny)
+                                    }
+                                }
                             }
                         }
                     }
@@ -216,7 +223,7 @@ fun PetScreen(viewModel: ChatViewModel = koinViewModel()) {
                         LinearProgressIndicator(
                             progress = { dialogueState.progress },
                             modifier = Modifier.fillMaxWidth().height(2.dp),
-                            color = Color(0xFF4CAF50),
+                            color = MaterialTheme.colorScheme.primary,
                             trackColor = Color.Transparent,
                         )
                     }
@@ -300,7 +307,7 @@ private fun FloatingPetButton(modifier: Modifier = Modifier) {
                 MaterialTheme.colorScheme.primaryContainer,
         ) {
             Icon(
-                if (isRunning) Icons.Default.Close else Icons.Default.OpenInNew,
+                if (isRunning) Icons.Default.Close else Icons.AutoMirrored.Filled.OpenInNew,
                 contentDescription = if (isRunning) "关闭悬浮宠物" else "悬浮宠物",
             )
         }

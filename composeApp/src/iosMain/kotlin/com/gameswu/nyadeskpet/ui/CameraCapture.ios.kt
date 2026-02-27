@@ -4,6 +4,7 @@ import androidx.compose.runtime.Composable
 import kotlinx.cinterop.*
 import platform.Foundation.*
 import platform.UIKit.*
+import platform.darwin.NSObject
 import platform.posix.memcpy
 
 /**

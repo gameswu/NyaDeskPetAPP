@@ -44,10 +44,6 @@ class GazeController {
     // 上一帧时间(ms)
     private var lastUpdateTime: Long = 0L
 
-    /** 是否有活跃目标（手指按下时 = true） */
-    var hasTarget: Boolean = false
-        private set
-
     /**
      * 设置目标位置（手指按下/移动时调用）。
      * @param x 归一化 X，范围 -1..1
@@ -56,7 +52,6 @@ class GazeController {
     fun setTarget(x: Float, y: Float) {
         targetX = x.coerceIn(-1f, 1f)
         targetY = y.coerceIn(-1f, 1f)
-        hasTarget = true
     }
 
     /**
@@ -66,7 +61,6 @@ class GazeController {
     fun clearTarget() {
         targetX = currentX
         targetY = currentY
-        hasTarget = false
     }
 
     /**
@@ -76,7 +70,6 @@ class GazeController {
     fun reset() {
         targetX = 0f
         targetY = 0f
-        hasTarget = false
     }
 
     /**
@@ -87,7 +80,6 @@ class GazeController {
         currentY = 0f
         targetX = 0f
         targetY = 0f
-        hasTarget = false
         lastUpdateTime = 0L
     }
 

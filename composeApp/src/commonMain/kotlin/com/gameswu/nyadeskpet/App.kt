@@ -2,7 +2,7 @@ package com.gameswu.nyadeskpet
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Chat
+import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.Pets
 import androidx.compose.material.icons.filled.Settings
@@ -45,7 +45,7 @@ fun App() {
                     NavigationBarItem(
                         selected = selectedTab == 1,
                         onClick = { selectedTab = 1 },
-                        icon = { Icon(Icons.Default.Chat, contentDescription = null) },
+                        icon = { Icon(Icons.AutoMirrored.Filled.Chat, contentDescription = null) },
                         label = { Text(I18nManager.t("tabs.chat")) }
                     )
                     NavigationBarItem(

@@ -14,6 +14,9 @@
  */
 package com.gameswu.nyadeskpet.agent.provider
 
+import io.ktor.client.*
+import io.ktor.client.engine.*
+import io.ktor.client.plugins.*
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonObject
@@ -220,7 +223,11 @@ abstract class LLMProvider(protected val config: ProviderConfig) {
      */
     open suspend fun chatStream(request: LLMRequest, onChunk: suspend (LLMStreamChunk) -> Unit) {
         val response = chat(request)
-        onChunk(LLMStreamChunk(delta = response.text, done = true, usage = response.usage))
+        // 先发一个 done=false 的内容 chunk，确保 handleStreamingChat() 能收集到内容
+        if (response.text.isNotEmpty()) {
+            onChunk(LLMStreamChunk(delta = response.text, done = false, usage = response.usage))
+        }
+        onChunk(LLMStreamChunk(delta = "", done = true, usage = response.usage))
     }
 
     /** 初始化 Provider（如创建 HTTP 客户端） */
@@ -257,19 +264,15 @@ abstract class LLMProvider(protected val config: ProviderConfig) {
 
     fun getModel(): String = modelName
 
+    /**
+     * 创建已配置超时和代理的 HttpClient
+     */
+    protected fun buildHttpClient(block: HttpClientConfig<*>.() -> Unit = {}): HttpClient =
+        buildProviderHttpClient(config, block)
+
     /** 类型安全的配置值读取 */
-    @Suppress("UNCHECKED_CAST")
-    protected fun <T> getConfigValue(key: String, defaultValue: T): T {
-        val value: Any? = when (key) {
-            "apiKey" -> config.apiKey
-            "baseUrl" -> config.baseUrl
-            "model" -> config.model
-            "timeout" -> config.timeout
-            "proxy" -> config.proxy
-            else -> config.extra[key]
-        }
-        return if (value != null && value != "") value as T else defaultValue
-    }
+    protected fun <T> getConfigValue(key: String, defaultValue: T): T =
+        getProviderConfigValue(config, key, defaultValue)
 }
 
 data class TestResult(
@@ -296,10 +299,6 @@ object ProviderRegistry {
 
     fun register(metadata: ProviderMetadata, factory: ProviderFactory) {
         entries[metadata.id] = RegistryEntry(metadata, factory)
-    }
-
-    fun unregister(id: String) {
-        entries.remove(id)
     }
 
     /** 创建 Provider 实例 */
@@ -342,7 +341,7 @@ val PROVIDER_CAPABILITY_FIELDS = listOf(
     ),
     ProviderConfigField(
         key = "supportsToolCalling", label = "工具调用", type = "boolean",
-        default = "false", description = "是否支持 Function Calling"
+        default = "true", description = "是否支持 Function Calling"
     ),
 )
 

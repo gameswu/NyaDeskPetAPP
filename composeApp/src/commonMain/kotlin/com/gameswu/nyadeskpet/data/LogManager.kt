@@ -89,11 +89,6 @@ expect class LogManager(context: PlatformContext, settingsRepository: SettingsRe
      * @return 是否成功
      */
     fun openLogDirectory(): Boolean
-
-    /**
-     * 关闭日志系统，写入会话结束标记
-     */
-    fun shutdown()
 }
 
 // ==================== 便捷扩展 ====================

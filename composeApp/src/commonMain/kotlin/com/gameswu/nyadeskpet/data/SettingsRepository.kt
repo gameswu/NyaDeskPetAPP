@@ -48,17 +48,16 @@ data class AppSettings(
     val primaryTtsInstanceId: String = "",
 
     // 麦克风 / ASR
-    /** ASR 模式: "system" = 系统识别器 | "whisper" = Whisper API */
-    val asrMode: String = "system",
+    /** ASR 模式: "local" = 本地模型 */
+    val asrMode: String = "local",
     val micBackgroundMode: Boolean = false,
     val micVolumeThreshold: Int = 30,
     val micAutoSend: Boolean = true,
-    val asrModel: String = "whisper-1",
-    /** Whisper API 密钥（留空则复用主 LLM Provider 的 API Key） */
-    val asrApiKey: String = "",
-    /** Whisper API Base URL */
-    val asrBaseUrl: String = "https://api.openai.com/v1",
-    /** Whisper 识别语言代码（留空 = 自动检测） */
+    /** 本地 ASR 模型文件路径（相对于 models 目录） */
+    val asrModelPath: String = "models/asr/sense-voice-small",
+    /** 本地 ASR 模型显示名称 */
+    val asrModelName: String = "SenseVoice-Small (内置)",
+    /** ASR 识别语言代码（留空 = 自动检测） */
     val asrLanguage: String = "",
 
     // 日志

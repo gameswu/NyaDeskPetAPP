@@ -54,7 +54,7 @@ fun SettingsScreen() {
                 )
             }
 
-            ScrollableTabRow(
+            PrimaryScrollableTabRow(
                 selectedTabIndex = selectedTab,
                 edgePadding = 8.dp,
                 containerColor = Color.Transparent,
@@ -237,7 +237,7 @@ private fun ConnectionSection(
             onValueChange = {},
             readOnly = true,
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
-            modifier = Modifier.fillMaxWidth().menuAnchor(),
+            modifier = Modifier.fillMaxWidth().menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable),
         )
         ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
             DropdownMenuItem(
@@ -299,75 +299,77 @@ private fun ConnectionSection(
         value = settings.volume,
         onValueChange = { repo.update { s -> s.copy(volume = it) } },
         valueRange = 0f..1f,
-        colors = SliderDefaults.colors(thumbColor = Color(0xFF4CAF50), activeTrackColor = Color(0xFF4CAF50))
+        colors = SliderDefaults.colors(thumbColor = MaterialTheme.colorScheme.primary, activeTrackColor = MaterialTheme.colorScheme.primary)
     )
 
-    // 麦克风 / ASR — 对齐原项目 microphone section + Whisper API 扩展
+    // 麦克风 / ASR — 本地模型
     SectionHeader(I18nManager.t("settings.microphone"))
 
-    // ASR 模式下拉框
-    val asrModeOptions = listOf(
-        "system" to "系统识别器",
-        "whisper" to "Whisper API",
-    )
-    var asrModeExpanded by remember { mutableStateOf(false) }
-    ExposedDropdownMenuBox(expanded = asrModeExpanded, onExpandedChange = { asrModeExpanded = it }) {
-        OutlinedTextField(
-            value = asrModeOptions.firstOrNull { it.first == settings.asrMode }?.second ?: settings.asrMode,
-            onValueChange = {},
-            readOnly = true,
-            label = { Text("ASR 模式") },
-            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(asrModeExpanded) },
-            modifier = Modifier.fillMaxWidth().menuAnchor(),
-        )
-        ExposedDropdownMenu(expanded = asrModeExpanded, onDismissRequest = { asrModeExpanded = false }) {
-            asrModeOptions.forEach { (value, label) ->
-                DropdownMenuItem(
-                    text = { Text(label) },
-                    onClick = {
-                        repo.update { it.copy(asrMode = value) }
-                        asrModeExpanded = false
-                    },
-                )
+    // ASR 本地模型
+    Text(I18nManager.t("settings.asrModel"), style = MaterialTheme.typography.labelMedium)
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+        ),
+    ) {
+        Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            // 当前模型信息
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        settings.asrModelName.ifBlank { "SenseVoice-Small (内置)" },
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Text(
+                        settings.asrModelPath.ifBlank { "未配置" },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                    )
+                }
+                // 仅在非默认模型时显示「恢复默认」按钮
+                if (settings.asrModelPath != "models/asr/sense-voice-small") {
+                    TextButton(onClick = {
+                        repo.update { it.copy(
+                            asrModelPath = "models/asr/sense-voice-small",
+                            asrModelName = "SenseVoice-Small (内置)"
+                        ) }
+                    }) {
+                        Text("恢复默认", style = MaterialTheme.typography.labelSmall)
+                    }
+                }
             }
-        }
-    }
 
-    // Whisper API 模式专用设置
-    if (settings.asrMode == "whisper") {
-        Spacer(modifier = Modifier.height(8.dp))
-        OutlinedTextField(
-            value = settings.asrApiKey,
-            onValueChange = { repo.update { s -> s.copy(asrApiKey = it) } },
-            label = { Text("Whisper API Key") },
-            placeholder = { Text("留空则复用主 LLM 的 API Key") },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true
-        )
-        OutlinedTextField(
-            value = settings.asrBaseUrl,
-            onValueChange = { repo.update { s -> s.copy(asrBaseUrl = it) } },
-            label = { Text("API Base URL") },
-            placeholder = { Text("https://api.openai.com/v1") },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true
-        )
-        OutlinedTextField(
-            value = settings.asrModel,
-            onValueChange = { repo.update { s -> s.copy(asrModel = it) } },
-            label = { Text(I18nManager.t("settings.asrModel")) },
-            placeholder = { Text("whisper-1") },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true
-        )
-        OutlinedTextField(
-            value = settings.asrLanguage,
-            onValueChange = { repo.update { s -> s.copy(asrLanguage = it) } },
-            label = { Text("识别语言") },
-            placeholder = { Text("留空 = 自动检测，如 zh, en, ja") },
-            modifier = Modifier.fillMaxWidth(),
-            singleLine = true
-        )
+            // 自定义模型路径（高级用户）
+            OutlinedTextField(
+                value = if (settings.asrModelPath == "models/asr/sense-voice-small") "" else settings.asrModelPath,
+                onValueChange = { path ->
+                    if (path.isBlank()) {
+                        repo.update { it.copy(
+                            asrModelPath = "models/asr/sense-voice-small",
+                            asrModelName = "SenseVoice-Small (内置)"
+                        ) }
+                    } else {
+                        val name = path.substringAfterLast("/").substringAfterLast("\\")
+                        repo.update { it.copy(asrModelPath = path, asrModelName = name) }
+                    }
+                },
+                label = { Text("自定义模型路径（可选）") },
+                placeholder = { Text("留空使用内置 SenseVoice-Small 模型") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Text(
+                "内置 SenseVoice-Small 模型，支持中/英/日/韩/粤语自动检测",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 
     Spacer(modifier = Modifier.height(8.dp))
@@ -386,7 +388,7 @@ private fun ConnectionSection(
         value = settings.micVolumeThreshold.toFloat(),
         onValueChange = { repo.update { s -> s.copy(micVolumeThreshold = it.toInt()) } },
         valueRange = 0f..100f,
-        colors = SliderDefaults.colors(thumbColor = Color(0xFF4CAF50), activeTrackColor = Color(0xFF4CAF50))
+        colors = SliderDefaults.colors(thumbColor = MaterialTheme.colorScheme.primary, activeTrackColor = MaterialTheme.colorScheme.primary)
     )
 }
 
@@ -410,7 +412,7 @@ private fun DisplaySection(
             onValueChange = {},
             readOnly = true,
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(themeExpanded) },
-            modifier = Modifier.fillMaxWidth().menuAnchor(),
+            modifier = Modifier.fillMaxWidth().menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable),
         )
         ExposedDropdownMenu(expanded = themeExpanded, onDismissRequest = { themeExpanded = false }) {
             themeOptions.forEach { (value, label) ->
@@ -434,7 +436,7 @@ private fun DisplaySection(
             onValueChange = {},
             readOnly = true,
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(langExpanded) },
-            modifier = Modifier.fillMaxWidth().menuAnchor(),
+            modifier = Modifier.fillMaxWidth().menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable),
         )
         ExposedDropdownMenu(expanded = langExpanded, onDismissRequest = { langExpanded = false }) {
             locales.forEach { (code, name) ->
@@ -558,7 +560,7 @@ private fun LogSection(
             value = settings.logRetentionDays.toFloat(),
             onValueChange = { repo.update { s -> s.copy(logRetentionDays = it.toInt()) } },
             valueRange = 1f..90f,
-            colors = SliderDefaults.colors(thumbColor = Color(0xFF4CAF50), activeTrackColor = Color(0xFF4CAF50))
+            colors = SliderDefaults.colors(thumbColor = MaterialTheme.colorScheme.primary, activeTrackColor = MaterialTheme.colorScheme.primary)
         )
     }
 
@@ -1002,7 +1004,7 @@ private fun SettingsToggle(
         Switch(
             checked = checked,
             onCheckedChange = onCheckedChange,
-            colors = SwitchDefaults.colors(checkedTrackColor = Color(0xFF4CAF50))
+            colors = SwitchDefaults.colors(checkedTrackColor = MaterialTheme.colorScheme.primary)
         )
     }
 }
@@ -1030,7 +1032,7 @@ private fun TapAreaItem(
                 Switch(
                     checked = enabled,
                     onCheckedChange = onEnabledChange,
-                    colors = SwitchDefaults.colors(checkedTrackColor = Color(0xFF4CAF50))
+                    colors = SwitchDefaults.colors(checkedTrackColor = MaterialTheme.colorScheme.primary)
                 )
             }
             if (enabled) {

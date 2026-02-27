@@ -14,6 +14,11 @@ class AgentClient(
     private val settingsRepo: SettingsRepository,
     private val builtinAgentService: BuiltinAgentService,
 ) {
+    companion object {
+        /** WebSocket 重连延迟 */
+        private const val RECONNECT_DELAY_MS = 5000L
+    }
+
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private var session: WebSocketSession? = null
     private var reconnectJob: Job? = null
@@ -41,17 +46,11 @@ class AgentClient(
     private val _toolConfirms = MutableSharedFlow<ToolConfirmData>()
     val toolConfirms: SharedFlow<ToolConfirmData> = _toolConfirms.asSharedFlow()
 
-    private val _toolStatusEvents = MutableSharedFlow<ToolStatusData>()
-    val toolStatusEvents: SharedFlow<ToolStatusData> = _toolStatusEvents.asSharedFlow()
-
     private val _commandRegistrations = MutableStateFlow<List<CommandDefinition>>(emptyList())
     val commandRegistrations: StateFlow<List<CommandDefinition>> = _commandRegistrations.asStateFlow()
 
     private val _commandResponses = MutableSharedFlow<CommandResponseData>()
     val commandResponses: SharedFlow<CommandResponseData> = _commandResponses.asSharedFlow()
-
-    private val _pluginInvokes = MutableSharedFlow<PluginInvokeData>()
-    val pluginInvokes: SharedFlow<PluginInvokeData> = _pluginInvokes.asSharedFlow()
 
     private val _systemMessages = MutableSharedFlow<String>()
     val systemMessages: SharedFlow<String> = _systemMessages.asSharedFlow()
@@ -102,7 +101,7 @@ class AgentClient(
                     session = null
                     _connectionState.value = ConnectionState.DISCONNECTED
                 }
-                delay(5000)
+                delay(RECONNECT_DELAY_MS)
             }
         }
     }
@@ -191,21 +190,6 @@ class AgentClient(
         ))
     }
 
-    /** 发送文件上传 */
-    suspend fun sendFileUpload(fileName: String, fileType: String, fileSize: Long, fileDataBase64: String) {
-        val data = FileUploadData(
-            fileName = fileName,
-            fileType = fileType,
-            fileSize = fileSize,
-            fileData = fileDataBase64,
-            timestamp = com.gameswu.nyadeskpet.currentTimeMillis()
-        )
-        sendMessage(BackendMessage(
-            type = "file_upload",
-            data = json.encodeToJsonElement(FileUploadData.serializer(), data)
-        ))
-    }
-
     /** 发送工具确认响应 */
     suspend fun sendToolConfirmResponse(confirmId: String, approved: Boolean, remember: Boolean? = null) {
         sendMessage(BackendMessage(
@@ -227,25 +211,6 @@ class AgentClient(
             type = "command_execute",
             text = name,
             data = json.parseToJsonElement("""{"command":"$name","args":"$args"}""")
-        ))
-    }
-
-    /** 发送插件状态 */
-    suspend fun sendPluginStatus(plugins: List<PluginStatusData.PluginEntry>) {
-        sendMessage(BackendMessage(
-            type = "plugin_status",
-            data = json.encodeToJsonElement(
-                PluginStatusData.serializer(),
-                PluginStatusData(plugins)
-            )
-        ))
-    }
-
-    /** 发送插件响应（对 plugin_invoke 的回复） */
-    suspend fun sendPluginResponse(data: PluginResponseData) {
-        sendMessage(BackendMessage(
-            type = "plugin_response",
-            data = json.encodeToJsonElement(PluginResponseData.serializer(), data)
         ))
     }
 
@@ -350,10 +315,6 @@ class AgentClient(
                 val data = json.decodeFromJsonElement(ToolConfirmData.serializer(), message.data!!)
                 _toolConfirms.emit(data)
             }
-            "tool_status" -> {
-                val data = json.decodeFromJsonElement(ToolStatusData.serializer(), message.data!!)
-                _toolStatusEvents.emit(data)
-            }
 
             // ----- 指令 -----
             "commands_register" -> {
@@ -363,12 +324,6 @@ class AgentClient(
             "command_response" -> {
                 val data = json.decodeFromJsonElement(CommandResponseData.serializer(), message.data!!)
                 _commandResponses.emit(data)
-            }
-
-            // ----- 插件 -----
-            "plugin_invoke" -> {
-                val data = json.decodeFromJsonElement(PluginInvokeData.serializer(), message.data!!)
-                _pluginInvokes.emit(data)
             }
 
             // ----- 系统 -----

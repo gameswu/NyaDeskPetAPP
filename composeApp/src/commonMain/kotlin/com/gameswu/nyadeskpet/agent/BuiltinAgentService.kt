@@ -76,9 +76,9 @@ class BuiltinAgentService(
     private val _providerInstancesFlow = MutableStateFlow<List<ProviderInstanceInfo>>(emptyList())
     val providerInstancesFlow: StateFlow<List<ProviderInstanceInfo>> = _providerInstancesFlow.asStateFlow()
 
-    // 供 UI 观测的 TTS 实例列表
-    private val _ttsInstancesFlow = MutableStateFlow<List<TTSProviderInstanceConfig>>(emptyList())
-    val ttsInstancesFlow: StateFlow<List<TTSProviderInstanceConfig>> = _ttsInstancesFlow.asStateFlow()
+    // 供 UI 观测的 TTS 实例列表（包含运行时状态）
+    private val _ttsInstancesFlow = MutableStateFlow<List<TTSProviderInstanceInfo>>(emptyList())
+    val ttsInstancesFlow: StateFlow<List<TTSProviderInstanceInfo>> = _ttsInstancesFlow.asStateFlow()
     val primaryTtsId: String get() = primaryTtsInstanceId
 
     init {
@@ -159,6 +159,16 @@ class BuiltinAgentService(
 
         saveConfig()
         notifyInstancesChanged()
+
+        // 如果新配置已启用，自动重新初始化
+        if (newConfig.enabled) {
+            entry.status = ProviderStatus.CONNECTING
+            notifyInstancesChanged()
+            scope.launch {
+                initializeProviderInstance(instanceId)
+            }
+        }
+
         return true
     }
 
@@ -266,7 +276,24 @@ class BuiltinAgentService(
 
     private fun notifyInstancesChanged() {
         _providerInstancesFlow.value = getProviderInstances()
-        _ttsInstancesFlow.value = ttsInstances.values.map { it.config }
+        _ttsInstancesFlow.value = getTtsProviderInstances()
+    }
+
+    /** 获取所有 TTS Provider 实例信息（包含运行时状态） */
+    fun getTtsProviderInstances(): List<TTSProviderInstanceInfo> {
+        return ttsInstances.map { (_, entry) ->
+            TTSProviderInstanceInfo(
+                instanceId = entry.config.instanceId,
+                providerId = entry.config.providerId,
+                displayName = entry.config.displayName,
+                config = entry.config.config,
+                metadata = TTSProviderRegistry.get(entry.config.providerId),
+                enabled = entry.config.enabled,
+                status = entry.status,
+                error = entry.error,
+                isPrimary = entry.config.instanceId == primaryTtsInstanceId,
+            )
+        }
     }
 
     // ==================== TTS Provider 实例 CRUD ====================
@@ -318,6 +345,29 @@ class BuiltinAgentService(
         return true
     }
 
+    /** 启用 TTS Provider 实例（启用后自动初始化） */
+    suspend fun enableTtsInstance(instanceId: String): TestResult {
+        val entry = ttsInstances[instanceId]
+            ?: return TestResult(false, "TTS 实例不存在")
+        entry.config = entry.config.copy(enabled = true)
+        saveConfig()
+        return initializeTtsInstance(instanceId)
+    }
+
+    /** 禁用 TTS Provider 实例 */
+    suspend fun disableTtsInstance(instanceId: String): TestResult {
+        val entry = ttsInstances[instanceId]
+            ?: return TestResult(false, "TTS 实例不存在")
+        entry.config = entry.config.copy(enabled = false)
+        entry.provider?.terminate()
+        entry.provider = null
+        entry.status = ProviderStatus.IDLE
+        entry.error = null
+        saveConfig()
+        notifyInstancesChanged()
+        return TestResult(true)
+    }
+
     // ==================== 持久化 ====================
 
     fun loadConfig() {
@@ -341,7 +391,13 @@ class BuiltinAgentService(
 
         notifyInstancesChanged()
 
-        // 自动初始化已启用的实例
+        // 自动初始化已启用的实例：先设为 CONNECTING 防止竞态，再异步初始化
+        for (entry in providerInstances.values) {
+            if (entry.config.enabled) {
+                entry.status = ProviderStatus.CONNECTING
+            }
+        }
+        notifyInstancesChanged()
         scope.launch {
             for (entry in providerInstances.values.toList()) {
                 if (entry.config.enabled) {
@@ -370,7 +426,7 @@ class BuiltinAgentService(
      */
     fun processModelInfo(info: ModelInfo) {
         this.modelInfo = info
-        println("[BuiltinAgentService] 已接收模型信息: motions=${(info.motions).keys}, expressions=${info.expressions}, hitAreas=${info.hitAreas}, paramCount=${info.availableParameters.size}")
+        logManager.log(LogLevel.DEBUG, "已接收模型信息: motions=${(info.motions).keys}, expressions=${info.expressions}, hitAreas=${info.hitAreas}, paramCount=${info.availableParameters.size}", "AgentService")
 
         // 转发给 PersonalityPlugin（对齐原项目 personality.setModelInfo）
         val personalityPlugin = pluginManager.getPlugin<PersonalityPlugin>("builtin.personality")
@@ -382,7 +438,7 @@ class BuiltinAgentService(
                     expressions = info.expressions,
                 )
             )
-            println("[BuiltinAgentService] 模型信息已转发给 PersonalityPlugin")
+            logManager.log(LogLevel.DEBUG, "模型信息已转发给 PersonalityPlugin", "AgentService")
         }
     }
 
@@ -394,11 +450,40 @@ class BuiltinAgentService(
         onEvent: suspend (AgentEvent) -> Unit,
     ) {
         logManager.log(LogLevel.INFO, "收到用户输入: \"${text.take(100)}\"${if (attachment != null) " [附件: ${attachment.type}]" else ""}", "AgentService")
-        val provider = getPrimaryProvider()
+
+        // 如果 Provider 尚未初始化完成（异步初始化中），等待最多 5 秒
+        var provider = getPrimaryProvider()
+        if (provider == null && primaryInstanceId.isNotBlank()) {
+            val entry = providerInstances[primaryInstanceId]
+            if (entry != null && entry.config.enabled &&
+                (entry.status == ProviderStatus.CONNECTING || entry.status == ProviderStatus.IDLE)
+            ) {
+                logManager.log(LogLevel.INFO, "Provider 正在初始化（status=${entry.status}），等待...", "AgentService")
+                for (i in 1..50) { // 50 x 100ms = 5s
+                    kotlinx.coroutines.delay(100)
+                    provider = getPrimaryProvider()
+                    if (provider != null) break
+                    // 如果状态变为 ERROR 则提前退出等待
+                    if (entry.status == ProviderStatus.ERROR) break
+                }
+            }
+        }
+
+        logManager.log(LogLevel.DEBUG, "主 Provider: ${if (provider != null) "已就绪 (${primaryInstanceId})" else "未初始化"}, 流式=${settingsRepo.current.llmStream}", "AgentService")
         if (provider == null) {
+            val entry = providerInstances[primaryInstanceId]
+            val detail = when {
+                primaryInstanceId.isBlank() -> "未设置主 LLM 实例"
+                entry == null -> "实例 $primaryInstanceId 不存在"
+                !entry.config.enabled -> "实例未启用"
+                entry.status == ProviderStatus.ERROR -> "初始化失败: ${entry.error}"
+                entry.status == ProviderStatus.CONNECTING -> "仍在初始化中，请稍后再试"
+                else -> "Provider 未就绪 (status=${entry.status})"
+            }
+            logManager.log(LogLevel.WARN, "无可用 Provider: $detail", "AgentService")
             onEvent(AgentEvent.Dialogue(
                 DialogueEvent.Complete(DialogueData(
-                    text = "[警告] 未配置 LLM Provider。请在 Agent 面板 → 概览 中添加并启用一个 LLM Provider。",
+                    text = "[警告] $detail。请在 Agent 面板 → 概览 中检查 LLM Provider 配置。",
                     duration = 8000L,
                 ))
             ))
@@ -481,6 +566,8 @@ class BuiltinAgentService(
                 // 收集流式工具调用增量
                 val toolCallAccumulators = mutableMapOf<Int, Triple<String, String, StringBuilder>>() // index -> (id, name, argBuilder)
 
+                var streamError: String? = null
+
                 provider.chatStream(currentRequest) { chunk ->
                     if (!chunk.done) {
                         if (chunk.delta.isNotEmpty()) {
@@ -505,7 +592,20 @@ class BuiltinAgentService(
                             delta.arguments?.let { acc.third.append(it) }
                             toolCallAccumulators[delta.index] = Triple(updatedId, updatedName, acc.third)
                         }
+                    } else if (chunk.delta.isNotEmpty()) {
+                        // done=true 且 delta 非空：通常是错误消息（HTTP 错误 / 连接失败 / 超时等）
+                        streamError = chunk.delta
+                        logManager.log(LogLevel.ERROR, "流式响应错误: ${chunk.delta}", "AgentService")
                     }
+                }
+
+                // 如果流式请求返回了错误，且没有积累到任何正常内容，直接返回错误
+                if (streamError != null && contentAcc.isEmpty()) {
+                    val duration = com.gameswu.nyadeskpet.currentTimeMillis() - startTime
+                    val errorText = "[错误] $streamError"
+                    conversationManager.addMessage(ChatMessage(role = "assistant", content = errorText))
+                    onEvent(AgentEvent.Dialogue(DialogueEvent.StreamEnd(errorText, null, duration)))
+                    return
                 }
 
                 // 检查是否有积累的工具调用
@@ -548,6 +648,14 @@ class BuiltinAgentService(
                 val fullText = contentAcc.toString()
                 val reasoning = reasoningAcc.toString().takeIf { it.isNotEmpty() }
 
+                if (fullText.isBlank() && streamError != null) {
+                    // 有错误且无正常内容
+                    val errorText = "[错误] $streamError"
+                    conversationManager.addMessage(ChatMessage(role = "assistant", content = errorText))
+                    onEvent(AgentEvent.Dialogue(DialogueEvent.StreamEnd(errorText, null, duration)))
+                    return
+                }
+
                 conversationManager.addMessage(ChatMessage(
                     role = "assistant",
                     content = fullText,
@@ -588,6 +696,18 @@ class BuiltinAgentService(
             while (iteration < maxToolIterations) {
                 iteration++
                 val response = provider.chat(currentRequest)
+
+                // 检查 API 错误（finishReason == "error" 表示 HTTP 错误或请求失败）
+                if (response.finishReason == "error") {
+                    val duration = com.gameswu.nyadeskpet.currentTimeMillis() - startTime
+                    val errorText = "[错误] ${response.text}"
+                    logManager.log(LogLevel.ERROR, "LLM 请求失败: ${response.text}", "AgentService")
+                    conversationManager.addMessage(ChatMessage(role = "assistant", content = errorText))
+                    onEvent(AgentEvent.Dialogue(
+                        DialogueEvent.Complete(DialogueData(text = errorText, duration = 5000L))
+                    ))
+                    return
+                }
 
                 // 检查是否有工具调用
                 if (!response.toolCalls.isNullOrEmpty()) {
@@ -990,6 +1110,7 @@ class BuiltinAgentService(
      * 3. 合成 → audio_stream_start → audio_chunk → audio_stream_end
      */
     private suspend fun handleTts(text: String, onEvent: suspend (AgentEvent) -> Unit) {
+        if (text.isBlank()) return  // 空文本不合成
         if (primaryTtsInstanceId.isBlank()) return  // 没有 TTS 就静默跳过
         val entry = ttsInstances[primaryTtsInstanceId] ?: return
         if (!entry.config.enabled) return
@@ -1006,20 +1127,9 @@ class BuiltinAgentService(
 
             val provider = entry.provider ?: return
             val format = entry.config.config.extra["format"] ?: "mp3"
-            val mimeType = when (format) {
-                "wav" -> "audio/wav"
-                "pcm" -> "audio/pcm"
-                "opus" -> "audio/opus"
-                else -> "audio/mpeg"
-            }
+            val mimeType = audioFormatToMimeType(format)
 
-            // 发送 audio_stream_start
-            onEvent(AgentEvent.Audio(AudioEvent.Start(AudioStreamStartData(
-                mimeType = mimeType,
-                text = text,
-            ))))
-
-            // 合成（非流式，返回完整音频 base64）
+            // 先合成音频，成功后再发送 audio_stream_start——避免合成失败时 ExoPlayer 收到空数据报错
             val voiceId = entry.config.config.extra["voiceId"]
             val response = provider.synthesize(TTSRequest(
                 text = text,
@@ -1027,20 +1137,21 @@ class BuiltinAgentService(
                 format = format,
             ))
 
-            // 发送音频数据（单个 chunk）
+            // 合成成功，发送音频流
+            onEvent(AgentEvent.Audio(AudioEvent.Start(AudioStreamStartData(
+                mimeType = mimeType,
+                text = text,
+            ))))
             onEvent(AgentEvent.Audio(AudioEvent.Chunk(AudioChunkData(
                 chunk = response.audioBase64,
                 sequence = 0,
             ))))
-
-            // 发送 audio_stream_end
             onEvent(AgentEvent.Audio(AudioEvent.End))
 
-            println("[BuiltinAgentService] TTS 合成完成")
+            logManager.log(LogLevel.DEBUG, "TTS 合成完成", "AgentService")
         } catch (e: Exception) {
-            println("[BuiltinAgentService] TTS 合成失败（非致命）: ${e.message}")
-            // 已发送 start 则需发送 end 通知前端清理
-            try { onEvent(AgentEvent.Audio(AudioEvent.End)) } catch (_: Exception) {}
+            logManager.log(LogLevel.WARN, "TTS 合成失败（非致命）: ${e.message}", "AgentService")
+            // 合成失败时不发送任何音频事件，避免 ExoPlayer 空数据报错
         }
     }
 
@@ -1079,6 +1190,11 @@ class BuiltinAgentService(
     fun getHistorySize(): Int = conversationManager.getHistory(Int.MAX_VALUE).size
     val conversationList get() = conversationManager.conversations
     val currentConversationId get() = conversationManager.currentConversationId
+
+    /** 获取指定对话的所有消息（供 UI 加载历史记录） */
+    fun getConversationMessages(conversationId: String): List<ConversationManager.StoredMessage> {
+        return conversationManager.getMessages(conversationId)
+    }
 
     // ==================== 事件监听器 — 供 PluginContext 回调 ====================
 

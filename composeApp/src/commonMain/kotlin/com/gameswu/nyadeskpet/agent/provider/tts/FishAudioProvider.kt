@@ -65,7 +65,11 @@ internal data class FishAudioModel(
 
 class FishAudioProvider(config: ProviderConfig) : TTSProvider(config) {
 
-    private val httpClient = HttpClient { expectSuccess = false }
+    companion object {
+        private const val BASE_URL = "https://api.fish.audio"
+    }
+
+    private val httpClient = buildHttpClient()
     private var cachedVoices: List<VoiceInfo> = emptyList()
 
     private val json = Json {
@@ -111,7 +115,7 @@ class FishAudioProvider(config: ProviderConfig) : TTSProvider(config) {
             } else null,
         )
 
-        val response = httpClient.post("https://api.fish.audio/v1/tts") {
+        val response = httpClient.post("$BASE_URL/v1/tts") {
             apiKey?.let { header("Authorization", "Bearer $it") }
             header("model", model)
             contentType(ContentType.Application.Json)
@@ -130,13 +134,7 @@ class FishAudioProvider(config: ProviderConfig) : TTSProvider(config) {
         val audioBytes = response.readRawBytes()
         val audioBase64 = Base64.encode(audioBytes)
 
-        val mimeType = when (format) {
-            "mp3" -> "audio/mpeg"
-            "wav" -> "audio/wav"
-            "opus" -> "audio/opus"
-            "pcm" -> "audio/pcm"
-            else -> "audio/mpeg"
-        }
+        val mimeType = audioFormatToMimeType(format)
 
         return TTSResponse(audioBase64 = audioBase64, mimeType = mimeType)
     }
@@ -149,7 +147,7 @@ class FishAudioProvider(config: ProviderConfig) : TTSProvider(config) {
 
         try {
             // 获取用户自己的音色
-            val selfResp = httpClient.get("https://api.fish.audio/model") {
+            val selfResp = httpClient.get("$BASE_URL/model") {
                 apiKey?.let { header("Authorization", "Bearer $it") }
                 parameter("page_size", 100)
                 parameter("page_number", 1)
@@ -169,7 +167,7 @@ class FishAudioProvider(config: ProviderConfig) : TTSProvider(config) {
             }
 
             // 获取平台热门音色
-            val publicResp = httpClient.get("https://api.fish.audio/model") {
+            val publicResp = httpClient.get("$BASE_URL/model") {
                 apiKey?.let { header("Authorization", "Bearer $it") }
                 parameter("page_size", 50)
                 parameter("page_number", 1)
@@ -200,7 +198,7 @@ class FishAudioProvider(config: ProviderConfig) : TTSProvider(config) {
         return try {
             if (!initialized) initialize()
             val apiKey = getConfigValue<String?>("apiKey", null)
-            val resp = httpClient.get("https://api.fish.audio/model") {
+            val resp = httpClient.get("$BASE_URL/model") {
                 apiKey?.let { header("Authorization", "Bearer $it") }
                 parameter("page_size", 1)
                 parameter("page_number", 1)

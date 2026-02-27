@@ -35,19 +35,10 @@ fun ChatScreen(viewModel: ChatViewModel = koinViewModel()) {
     val settingsRepo: SettingsRepository = koinInject()
     val settings by settingsRepo.settings.collectAsState()
 
-    // 语音输入 — 双模式（系统识别器 / Whisper API）
-    // 如果 ASR API Key 为空，尝试复用主 LLM Provider 的 API Key
-    val effectiveAsrApiKey = settings.asrApiKey.ifBlank {
-        val primaryId = settings.primaryLlmInstanceId
-        settings.llmProviderInstances
-            .firstOrNull { it.instanceId == primaryId }
-            ?.config?.apiKey ?: ""
-    }
+    // 语音输入 — 本地模型 ASR
     val voiceInput = rememberDualModeVoiceInput(
         asrMode = settings.asrMode,
-        asrApiKey = effectiveAsrApiKey,
-        asrBaseUrl = settings.asrBaseUrl,
-        asrModel = settings.asrModel,
+        asrModelPath = settings.asrModelPath,
         asrLanguage = settings.asrLanguage,
         onResult = { text ->
             viewModel.onInputChanged(text)

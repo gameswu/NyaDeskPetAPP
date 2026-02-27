@@ -1,3 +1,5 @@
+@file:OptIn(kotlinx.cinterop.ExperimentalForeignApi::class, kotlinx.cinterop.BetaInteropApi::class)
+
 package com.gameswu.nyadeskpet.data
 
 import com.gameswu.nyadeskpet.PlatformContext
@@ -31,7 +33,7 @@ actual class LogManager actual constructor(
     private val isoFormatter: NSDateFormatter by lazy {
         NSDateFormatter().apply {
             dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'"
-            timeZone = NSTimeZone.timeZoneWithName("UTC")
+            timeZone = NSTimeZone.timeZoneWithName("UTC")!!
             locale = NSLocale(localeIdentifier = "en_US_POSIX")
         }
     }
@@ -93,8 +95,8 @@ actual class LogManager actual constructor(
         val fm = NSFileManager.defaultManager
         val contents = fm.contentsOfDirectoryAtPath(logDir, error = null) ?: return emptyList()
 
-        return (0 until contents.count.toInt()).mapNotNull { i ->
-            val name = contents.objectAtIndex(i.toULong()) as? String ?: return@mapNotNull null
+        return (0 until contents.size).mapNotNull { i ->
+            val name = contents[i] as? String ?: return@mapNotNull null
             if (!name.endsWith(".log")) return@mapNotNull null
             val path = "$logDir/$name"
             val attrs = fm.attributesOfItemAtPath(path, error = null) ?: return@mapNotNull null
@@ -125,8 +127,8 @@ actual class LogManager actual constructor(
         val fm = NSFileManager.defaultManager
         val contents = fm.contentsOfDirectoryAtPath(logDir, error = null) ?: return 0
         var count = 0
-        for (i in 0 until contents.count.toInt()) {
-            val name = contents.objectAtIndex(i.toULong()) as? String ?: continue
+        for (i in 0 until contents.size) {
+            val name = contents[i] as? String ?: continue
             if (name.endsWith(".log") && name != currentSessionFileName) {
                 if (fm.removeItemAtPath("$logDir/$name", error = null)) count++
             }
@@ -138,8 +140,8 @@ actual class LogManager actual constructor(
         val fm = NSFileManager.defaultManager
         val contents = fm.contentsOfDirectoryAtPath(logDir, error = null) ?: return 0
         var total = 0L
-        for (i in 0 until contents.count.toInt()) {
-            val name = contents.objectAtIndex(i.toULong()) as? String ?: continue
+        for (i in 0 until contents.size) {
+            val name = contents[i] as? String ?: continue
             val path = "$logDir/$name"
             val attrs = fm.attributesOfItemAtPath(path, error = null) ?: continue
             val size = (attrs[NSFileSize] as? NSNumber)?.longValue ?: 0L
@@ -153,23 +155,11 @@ actual class LogManager actual constructor(
         return false
     }
 
-    actual fun shutdown() {
-        try {
-            val footer = buildString {
-                appendLine("================================================================================")
-                appendLine("Session ended at: ${isoFormatter.stringFromDate(NSDate())}")
-                appendLine("================================================================================")
-            }
-            appendToFile(footer)
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-    }
-
     // ==================== 内部方法 ====================
 
     private fun appendToFile(text: String) {
-        val data = (text as NSString).dataUsingEncoding(NSUTF8StringEncoding) ?: return
+        val nsStr = platform.Foundation.NSString.create(string = text)
+        val data = nsStr.dataUsingEncoding(NSUTF8StringEncoding) ?: return
         val fm = NSFileManager.defaultManager
         if (!fm.fileExistsAtPath(logFilePath)) {
             fm.createFileAtPath(logFilePath, contents = data, attributes = null)
@@ -187,8 +177,8 @@ actual class LogManager actual constructor(
             val contents = fm.contentsOfDirectoryAtPath(logDir, error = null) ?: return
             val cutoffMs = currentTimeMillis() - retentionDays * 24L * 60 * 60 * 1000
 
-            for (i in 0 until contents.count.toInt()) {
-                val name = contents.objectAtIndex(i.toULong()) as? String ?: continue
+            for (i in 0 until contents.size) {
+                val name = contents[i] as? String ?: continue
                 if (!name.endsWith(".log") || name == currentSessionFileName) continue
                 val path = "$logDir/$name"
                 val attrs = fm.attributesOfItemAtPath(path, error = null) ?: continue

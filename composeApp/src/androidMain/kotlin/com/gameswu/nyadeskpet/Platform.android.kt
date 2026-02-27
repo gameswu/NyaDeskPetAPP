@@ -3,12 +3,6 @@ package com.gameswu.nyadeskpet
 import android.content.Context
 import android.os.Build
 
-class AndroidPlatform : Platform {
-    override val name: String = "Android ${Build.VERSION.SDK_INT}"
-}
-
-actual fun getPlatform(): Platform = AndroidPlatform()
-
 actual fun currentTimeMillis(): Long = System.currentTimeMillis()
 
 /**
@@ -20,6 +14,15 @@ actual fun getAppVersion(): String = AppBuildConfig.VERSION_NAME
 actual fun formatEpochMillis(ms: Long): String {
     val sdf = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.getDefault())
     return sdf.format(java.util.Date(ms))
+}
+
+actual fun formatUtcDate(): String {
+    val sdf = java.text.SimpleDateFormat(
+        "EEE MMM dd yyyy HH:mm:ss 'GMT+0000 (Coordinated Universal Time)'",
+        java.util.Locale.US
+    )
+    sdf.timeZone = java.util.TimeZone.getTimeZone("UTC")
+    return sdf.format(java.util.Date())
 }
 
 actual typealias PlatformContext = Context

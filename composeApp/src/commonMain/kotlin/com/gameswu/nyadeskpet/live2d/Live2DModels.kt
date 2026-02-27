@@ -11,6 +11,3 @@ data class ParameterSet(
     val holdMs: Long = 1000,
     val transitionOutMs: Long = 500
 )
-
-@Serializable
-data class Live2DModelInfo(val id: String, val name: String, val author: String?)

@@ -18,15 +18,15 @@
 - 🤖 **内置 AI Agent** — 支持多种 LLM 供应商，内置 Agent Pipeline 架构
 - 🧩 **插件体系** — 与原项目对齐的插件架构，支持表情/动作/命令等能力
 
-## 与原项目的关系
+## 与原项目功能对比
 
 | | 原项目 (桌面端) | 本项目 (移动端) |
 |---|---|---|
-| 技术栈 | Electron + TypeScript | Kotlin Multiplatform + Compose |
-| 平台 | Windows / macOS / Linux | Android / iOS |
-| Live2D | PixiJS + Cubism Web SDK | OpenGL ES + Cubism Native SDK |
-| Agent | Node.js 内置服务器 | Kotlin 内置 Agent |
-| 通信 | WebSocket | 进程内直接调用 |
+| 前端插件 | 完整支持 | 不支持 |
+| 内置 Agent 插件 | 完整支持 | 仅支持内置插件 |
+| MCP 协议 | 完整支持 | 仅支持 SSE |
+| 桌宠 | 完整支持 | 仅 Android 悬浮窗，iOS 受系统限制不支持 |
+| 帮助文档 | 完整支持 | 不支持 |
 
 API 协议、插件接口、数据格式等与原项目保持对齐。
 
@@ -52,15 +52,9 @@ API 协议、插件接口、数据格式等与原项目保持对齐。
 - Android SDK 24+
 - Xcode 15+（iOS 构建）
 
-### Android
+推荐直接使用 Android Studio 打开整个项目，Gradle 会自动配置多平台构建环境。
 
-```bash
-./gradlew :androidApp:assembleDebug
-```
-
-### iOS
-
-在 Xcode 中打开 iosApp.xcodeproj，选择目标设备后构建运行。
+iOS 端的 Live2D 渲染通过 Kotlin/Native cinterop 调用 C 桥接层，需要预先将 C/C++ 源码编译为 `.a` 静态库。源码位于 `composeApp/src/nativeInterop/cinterop/live2d/`。 `libLive2DCubismCore.a`（Cubism Native SDK 官方静态库）也需要放到对应目录中，从 [Live2D Cubism SDK for Native](https://www.live2d.com/sdk/download/native/) 下载获取。
 
 ## 支持
 

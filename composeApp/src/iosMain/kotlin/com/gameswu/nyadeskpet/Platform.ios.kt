@@ -1,16 +1,9 @@
+@file:OptIn(kotlinx.cinterop.ExperimentalForeignApi::class)
+
 package com.gameswu.nyadeskpet
 
-import platform.Foundation.NSBundle
-import platform.Foundation.NSDateFormatter
-import platform.Foundation.NSDate
-import platform.Foundation.timeIntervalSince1970
+import platform.Foundation.*
 import platform.UIKit.UIDevice
-
-class IOSPlatform: Platform {
-    override val name: String = UIDevice.currentDevice.systemName() + " " + UIDevice.currentDevice.systemVersion
-}
-
-actual fun getPlatform(): Platform = IOSPlatform()
 
 actual fun currentTimeMillis(): Long = (NSDate().timeIntervalSince1970 * 1000).toLong()
 
@@ -26,8 +19,18 @@ actual fun getAppVersion(): String {
 actual fun formatEpochMillis(ms: Long): String {
     val formatter = NSDateFormatter()
     formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
-    val date = NSDate(timeIntervalSince1970 = ms / 1000.0)
+    val date = NSDate(timeIntervalSinceReferenceDate = ms / 1000.0 - 978307200.0)
     return formatter.stringFromDate(date)
 }
 
-actual class PlatformContext
+actual fun formatUtcDate(): String {
+    val formatter = NSDateFormatter()
+    formatter.dateFormat = "EEE MMM dd yyyy HH:mm:ss 'GMT+0000 (Coordinated Universal Time)'"
+    formatter.locale = NSLocale("en_US")
+    formatter.timeZone = NSTimeZone.timeZoneWithName("UTC")!!
+    return formatter.stringFromDate(NSDate())
+}
+
+actual abstract class PlatformContext
+
+class IosPlatformContext : PlatformContext()

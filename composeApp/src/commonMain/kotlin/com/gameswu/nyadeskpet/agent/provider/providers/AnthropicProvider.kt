@@ -97,12 +97,19 @@ class AnthropicProvider(config: ProviderConfig) : LLMProvider(
         it.copy(model = it.model ?: "claude-sonnet-4-20250514")
     }
 ) {
-    private val httpClient = HttpClient { expectSuccess = false }
+    companion object {
+        private const val API_VERSION = "2023-06-01"
+        private const val DEFAULT_MAX_TOKENS = 4096
+        private const val DEFAULT_BASE_URL = "https://api.anthropic.com"
+    }
+
+    private val httpClient = buildHttpClient()
 
     private val json = Json {
         ignoreUnknownKeys = true
         isLenient = true
-        encodeDefaults = false
+        encodeDefaults = true
+        explicitNulls = false
     }
 
     override fun getMetadata(): ProviderMetadata = ANTHROPIC_METADATA
@@ -275,7 +282,7 @@ class AnthropicProvider(config: ProviderConfig) : LLMProvider(
     // ==================== 非流式聊天 ====================
 
     override suspend fun chat(request: LLMRequest): LLMResponse {
-        val baseUrl = getConfigValue("baseUrl", "https://api.anthropic.com")
+        val baseUrl = getConfigValue("baseUrl", DEFAULT_BASE_URL)
         val apiKey = getConfigValue<String?>("apiKey", null)
         val model = request.model ?: modelName
 
@@ -283,7 +290,7 @@ class AnthropicProvider(config: ProviderConfig) : LLMProvider(
             model = model,
             messages = convertMessages(request.messages),
             system = request.systemPrompt,
-            maxTokens = request.maxTokens ?: 4096,
+            maxTokens = request.maxTokens ?: DEFAULT_MAX_TOKENS,
             temperature = request.temperature,
             stream = false,
             tools = request.tools?.takeIf { it.isNotEmpty() }?.let { convertTools(it) },
@@ -293,7 +300,7 @@ class AnthropicProvider(config: ProviderConfig) : LLMProvider(
         return try {
             val response = httpClient.post("$baseUrl/v1/messages") {
                 apiKey?.let { header("x-api-key", it) }
-                header("anthropic-version", "2023-06-01")
+                header("anthropic-version", API_VERSION)
                 contentType(ContentType.Application.Json)
                 setBody(json.encodeToString(AnthropicRequestBody.serializer(), requestBody))
             }
@@ -339,7 +346,7 @@ class AnthropicProvider(config: ProviderConfig) : LLMProvider(
     // ==================== 流式聊天 ====================
 
     override suspend fun chatStream(request: LLMRequest, onChunk: suspend (LLMStreamChunk) -> Unit) {
-        val baseUrl = getConfigValue("baseUrl", "https://api.anthropic.com")
+        val baseUrl = getConfigValue("baseUrl", DEFAULT_BASE_URL)
         val apiKey = getConfigValue<String?>("apiKey", null)
         val model = request.model ?: modelName
 
@@ -347,7 +354,7 @@ class AnthropicProvider(config: ProviderConfig) : LLMProvider(
             model = model,
             messages = convertMessages(request.messages),
             system = request.systemPrompt,
-            maxTokens = request.maxTokens ?: 4096,
+            maxTokens = request.maxTokens ?: DEFAULT_MAX_TOKENS,
             temperature = request.temperature,
             stream = true,
             tools = request.tools?.takeIf { it.isNotEmpty() }?.let { convertTools(it) },
@@ -357,7 +364,7 @@ class AnthropicProvider(config: ProviderConfig) : LLMProvider(
         try {
             val statement = httpClient.preparePost("$baseUrl/v1/messages") {
                 apiKey?.let { header("x-api-key", it) }
-                header("anthropic-version", "2023-06-01")
+                header("anthropic-version", API_VERSION)
                 contentType(ContentType.Application.Json)
                 setBody(json.encodeToString(AnthropicRequestBody.serializer(), requestBody))
             }
@@ -380,116 +387,108 @@ class AnthropicProvider(config: ProviderConfig) : LLMProvider(
                 }
 
                 val channel: ByteReadChannel = response.bodyAsChannel()
-                val lineBuffer = StringBuilder()
                 var inputTokens = 0
                 var outputTokens = 0
 
                 // 追踪活跃的工具调用
                 val activeToolCalls = mutableMapOf<Int, Triple<String, String, StringBuilder>>() // index → (id, name, jsonAccumulator)
 
+                // 使用 readLine 正确处理多字节 UTF-8 字符（如中文）
                 while (!channel.isClosedForRead) {
-                    val byte = try { channel.readByte() } catch (_: Exception) { break }
-                    val char = byte.toInt().toChar()
+                    val line = (try { channel.readLine() } catch (_: Exception) { null })?.trim() ?: break
 
-                    if (char == '\n') {
-                        val line = lineBuffer.toString().trim()
-                        lineBuffer.clear()
+                    if (line.startsWith("data: ")) {
+                        val data = line.removePrefix("data: ")
+                        try {
+                            val event = json.parseToJsonElement(data).jsonObject
+                            val eventType = event["type"]?.jsonPrimitive?.contentOrNull ?: ""
 
-                        if (line.startsWith("data: ")) {
-                            val data = line.removePrefix("data: ")
-                            try {
-                                val event = json.parseToJsonElement(data).jsonObject
-                                val eventType = event["type"]?.jsonPrimitive?.contentOrNull ?: ""
+                            when (eventType) {
+                                "message_start" -> {
+                                    val usage = event["message"]?.jsonObject?.get("usage")?.jsonObject
+                                    inputTokens = usage?.get("input_tokens")?.jsonPrimitive?.intOrNull ?: 0
+                                }
 
-                                when (eventType) {
-                                    "message_start" -> {
-                                        val usage = event["message"]?.jsonObject?.get("usage")?.jsonObject
-                                        inputTokens = usage?.get("input_tokens")?.jsonPrimitive?.intOrNull ?: 0
-                                    }
+                                "content_block_start" -> {
+                                    val contentBlock = event["content_block"]?.jsonObject
+                                    val blockType = contentBlock?.get("type")?.jsonPrimitive?.contentOrNull
+                                    val index = event["index"]?.jsonPrimitive?.intOrNull
 
-                                    "content_block_start" -> {
-                                        val contentBlock = event["content_block"]?.jsonObject
-                                        val blockType = contentBlock?.get("type")?.jsonPrimitive?.contentOrNull
-                                        val index = event["index"]?.jsonPrimitive?.intOrNull
-
-                                        if (blockType == "tool_use" && index != null) {
-                                            val blockId = contentBlock["id"]?.jsonPrimitive?.contentOrNull ?: ""
-                                            val blockName = contentBlock["name"]?.jsonPrimitive?.contentOrNull ?: ""
-                                            activeToolCalls[index] = Triple(blockId, blockName, StringBuilder())
-                                            onChunk(LLMStreamChunk(
-                                                delta = "",
-                                                done = false,
-                                                toolCallDeltas = listOf(ToolCallDelta(
-                                                    index = index,
-                                                    id = blockId,
-                                                    name = blockName,
-                                                    arguments = "",
-                                                )),
-                                            ))
-                                        }
-                                    }
-
-                                    "content_block_delta" -> {
-                                        val delta = event["delta"]?.jsonObject
-                                        val deltaType = delta?.get("type")?.jsonPrimitive?.contentOrNull
-                                        val index = event["index"]?.jsonPrimitive?.intOrNull
-
-                                        when (deltaType) {
-                                            "text_delta" -> {
-                                                val text = delta["text"]?.jsonPrimitive?.contentOrNull ?: ""
-                                                onChunk(LLMStreamChunk(delta = text, done = false))
-                                            }
-                                            "input_json_delta" -> {
-                                                val partialJson = delta["partial_json"]?.jsonPrimitive?.contentOrNull ?: ""
-                                                if (index != null) {
-                                                    activeToolCalls[index]?.third?.append(partialJson)
-                                                    onChunk(LLMStreamChunk(
-                                                        delta = "",
-                                                        done = false,
-                                                        toolCallDeltas = listOf(ToolCallDelta(
-                                                            index = index,
-                                                            arguments = partialJson,
-                                                        )),
-                                                    ))
-                                                }
-                                            }
-                                        }
-                                    }
-
-                                    "message_delta" -> {
-                                        val usage = event["usage"]?.jsonObject
-                                        if (usage != null) {
-                                            outputTokens = usage["output_tokens"]?.jsonPrimitive?.intOrNull ?: outputTokens
-                                        }
-                                        val stopReason = event["delta"]?.jsonObject?.get("stop_reason")?.jsonPrimitive?.contentOrNull
-                                        if (stopReason != null) {
-                                            onChunk(LLMStreamChunk(
-                                                delta = "",
-                                                done = false,
-                                                finishReason = convertStopReason(stopReason),
-                                            ))
-                                        }
-                                    }
-
-                                    "message_stop" -> {
+                                    if (blockType == "tool_use" && index != null) {
+                                        val blockId = contentBlock["id"]?.jsonPrimitive?.contentOrNull ?: ""
+                                        val blockName = contentBlock["name"]?.jsonPrimitive?.contentOrNull ?: ""
+                                        activeToolCalls[index] = Triple(blockId, blockName, StringBuilder())
                                         onChunk(LLMStreamChunk(
                                             delta = "",
-                                            done = true,
-                                            usage = TokenUsage(
-                                                promptTokens = inputTokens,
-                                                completionTokens = outputTokens,
-                                                totalTokens = inputTokens + outputTokens,
-                                            ),
+                                            done = false,
+                                            toolCallDeltas = listOf(ToolCallDelta(
+                                                index = index,
+                                                id = blockId,
+                                                name = blockName,
+                                                arguments = "",
+                                            )),
                                         ))
-                                        return@execute
                                     }
                                 }
-                            } catch (_: Exception) {
-                                // 忽略解析错误
+
+                                "content_block_delta" -> {
+                                    val delta = event["delta"]?.jsonObject
+                                    val deltaType = delta?.get("type")?.jsonPrimitive?.contentOrNull
+                                    val index = event["index"]?.jsonPrimitive?.intOrNull
+
+                                    when (deltaType) {
+                                        "text_delta" -> {
+                                            val text = delta["text"]?.jsonPrimitive?.contentOrNull ?: ""
+                                            onChunk(LLMStreamChunk(delta = text, done = false))
+                                        }
+                                        "input_json_delta" -> {
+                                            val partialJson = delta["partial_json"]?.jsonPrimitive?.contentOrNull ?: ""
+                                            if (index != null) {
+                                                activeToolCalls[index]?.third?.append(partialJson)
+                                                onChunk(LLMStreamChunk(
+                                                    delta = "",
+                                                    done = false,
+                                                    toolCallDeltas = listOf(ToolCallDelta(
+                                                        index = index,
+                                                        arguments = partialJson,
+                                                    )),
+                                                ))
+                                            }
+                                        }
+                                    }
+                                }
+
+                                "message_delta" -> {
+                                    val usage = event["usage"]?.jsonObject
+                                    if (usage != null) {
+                                        outputTokens = usage["output_tokens"]?.jsonPrimitive?.intOrNull ?: outputTokens
+                                    }
+                                    val stopReason = event["delta"]?.jsonObject?.get("stop_reason")?.jsonPrimitive?.contentOrNull
+                                    if (stopReason != null) {
+                                        onChunk(LLMStreamChunk(
+                                            delta = "",
+                                            done = false,
+                                            finishReason = convertStopReason(stopReason),
+                                        ))
+                                    }
+                                }
+
+                                "message_stop" -> {
+                                    onChunk(LLMStreamChunk(
+                                        delta = "",
+                                        done = true,
+                                        usage = TokenUsage(
+                                            promptTokens = inputTokens,
+                                            completionTokens = outputTokens,
+                                            totalTokens = inputTokens + outputTokens,
+                                        ),
+                                    ))
+                                    return@execute
+                                }
                             }
+                        } catch (_: Exception) {
+                            // 忽略解析错误
                         }
-                    } else {
-                        lineBuffer.append(char)
                     }
                 }
 

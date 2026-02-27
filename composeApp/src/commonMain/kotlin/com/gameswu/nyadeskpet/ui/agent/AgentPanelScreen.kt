@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -47,7 +48,7 @@ fun AgentPanelScreen() {
 
     Box(modifier = Modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxSize()) {
-            ScrollableTabRow(
+            PrimaryScrollableTabRow(
                 selectedTabIndex = selectedTab,
                 edgePadding = 8.dp,
                 containerColor = MaterialTheme.colorScheme.surface,
@@ -193,8 +194,9 @@ private fun OverviewTab(connState: ConnectionState, agentClient: AgentClient, sn
         }
 
         // ===== TTS Provider 区 =====
-        SectionHeader(I18nManager.t("agent.ttsProviders"), Icons.Default.VolumeUp)
+        SectionHeader(I18nManager.t("agent.ttsProviders"), Icons.AutoMirrored.Filled.VolumeUp)
         var showAddTtsDialog by remember { mutableStateOf(false) }
+        var editingTtsInstance by remember { mutableStateOf<TTSProviderInstanceInfo?>(null) }
         val ttsInstances by builtinAgent.ttsInstancesFlow.collectAsState()
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(16.dp)) {
@@ -209,49 +211,32 @@ private fun OverviewTab(connState: ConnectionState, agentClient: AgentClient, sn
                 if (ttsInstances.isEmpty()) {
                     EmptyHint(I18nManager.t("agent.noProviders"))
                 } else {
-                    ttsInstances.forEach { cfg ->
-                        val isPrimary = cfg.instanceId == builtinAgent.primaryTtsId
-                        Card(
-                            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                            colors = CardDefaults.cardColors(
-                                containerColor = if (isPrimary)
-                                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
-                                else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-                            ),
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth().padding(12.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                        Text(cfg.displayName, style = MaterialTheme.typography.titleSmall)
-                                        if (isPrimary) {
-                                            AssistChip(onClick = {}, label = { Text("主要", style = MaterialTheme.typography.labelSmall) })
-                                        }
+                    ttsInstances.forEach { info ->
+                        TtsProviderInstanceCard(
+                            info = info,
+                            onSetPrimary = {
+                                builtinAgent.setPrimaryTts(info.instanceId)
+                            },
+                            onToggleEnabled = {
+                                coroutineScope.launch {
+                                    if (info.enabled) {
+                                        builtinAgent.disableTtsInstance(info.instanceId)
+                                    } else {
+                                        builtinAgent.enableTtsInstance(info.instanceId)
                                     }
-                                    Text(
-                                        TTSProviderRegistry.get(cfg.providerId)?.name ?: cfg.providerId,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                }
+                            },
+                            onEdit = { editingTtsInstance = info },
+                            onDelete = {
+                                builtinAgent.removeTtsInstance(info.instanceId)
+                                coroutineScope.launch {
+                                    snackbarHostState.showSnackbar(
+                                        message = "已删除 \"${info.displayName}\"",
+                                        duration = SnackbarDuration.Short,
                                     )
                                 }
-                                Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                                    if (!isPrimary) {
-                                        IconButton(onClick = { builtinAgent.setPrimaryTts(cfg.instanceId) }, modifier = Modifier.size(32.dp)) {
-                                            Icon(Icons.Default.Star, contentDescription = "设为主要", modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                                        }
-                                    }
-                                    IconButton(
-                                        onClick = { builtinAgent.removeTtsInstance(cfg.instanceId) },
-                                        modifier = Modifier.size(32.dp),
-                                    ) {
-                                        Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.error.copy(alpha = 0.7f))
-                                    }
-                                }
-                            }
-                        }
+                            },
+                        )
                     }
                 }
             }
@@ -267,6 +252,28 @@ private fun OverviewTab(connState: ConnectionState, agentClient: AgentClient, sn
                     coroutineScope.launch {
                         snackbarHostState.showSnackbar(
                             message = "TTS \"${ttsConfig.displayName}\" 已添加",
+                            duration = SnackbarDuration.Short,
+                        )
+                        // 如果标记了 enabled，自动初始化
+                        if (ttsConfig.enabled) {
+                            builtinAgent.enableTtsInstance(ttsConfig.instanceId)
+                        }
+                    }
+                },
+            )
+        }
+
+        // ===== 编辑 TTS Provider 对话框 =====
+        editingTtsInstance?.let { info ->
+            EditTtsProviderDialog(
+                info = info,
+                onDismiss = { editingTtsInstance = null },
+                onSave = { newConfig ->
+                    builtinAgent.updateTtsInstance(info.instanceId, newConfig)
+                    editingTtsInstance = null
+                    coroutineScope.launch {
+                        snackbarHostState.showSnackbar(
+                            message = "TTS \"${newConfig.displayName}\" 已更新",
                             duration = SnackbarDuration.Short,
                         )
                     }
@@ -456,21 +463,21 @@ private fun AddProviderDialog(
     val availableTypes = remember { ProviderRegistry.getAll() }
     var selectedTypeIndex by remember { mutableIntStateOf(0) }
     var displayName by remember { mutableStateOf("") }
-    var apiKey by remember { mutableStateOf("") }
-    var baseUrl by remember { mutableStateOf("") }
-    var model by remember { mutableStateOf("") }
-    var showApiKey by remember { mutableStateOf(false) }
     var enableOnCreate by remember { mutableStateOf(true) }
     var typeExpanded by remember { mutableStateOf(false) }
 
-    // 当切换 Provider 类型时，更新默认值
+    // 动态字段值 — 键对应 configSchema 的 key
+    val fieldValues = remember { mutableStateMapOf<String, String>() }
+
+    // 当切换 Provider 类型时，重置所有字段为默认值
     val selectedType = availableTypes.getOrNull(selectedTypeIndex)
     LaunchedEffect(selectedTypeIndex) {
+        fieldValues.clear()
         if (selectedType != null) {
             if (displayName.isBlank()) displayName = selectedType.name
-            val schema = selectedType.configSchema
-            baseUrl = schema.find { it.key == "baseUrl" }?.default ?: ""
-            model = schema.find { it.key == "model" }?.default ?: ""
+            for (field in selectedType.configSchema) {
+                field.default?.let { fieldValues[field.key] = it }
+            }
         }
     }
 
@@ -490,7 +497,7 @@ private fun AddProviderDialog(
                         onValueChange = {},
                         readOnly = true,
                         trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(typeExpanded) },
-                        modifier = Modifier.fillMaxWidth().menuAnchor(),
+                        modifier = Modifier.fillMaxWidth().menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable),
                         singleLine = true,
                     )
                     ExposedDropdownMenu(expanded = typeExpanded, onDismissRequest = { typeExpanded = false }) {
@@ -524,44 +531,14 @@ private fun AddProviderDialog(
                     modifier = Modifier.fillMaxWidth(),
                 )
 
-                // API Key
-                OutlinedTextField(
-                    value = apiKey,
-                    onValueChange = { apiKey = it },
-                    label = { Text("API Key") },
-                    placeholder = { Text("sk-...") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                    visualTransformation = if (showApiKey) VisualTransformation.None else PasswordVisualTransformation(),
-                    trailingIcon = {
-                        IconButton(onClick = { showApiKey = !showApiKey }) {
-                            Icon(
-                                if (showApiKey) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                                contentDescription = null,
-                            )
-                        }
-                    },
-                )
-
-                // Base URL
-                OutlinedTextField(
-                    value = baseUrl,
-                    onValueChange = { baseUrl = it },
-                    label = { Text("API Base URL") },
-                    placeholder = { Text(selectedType?.configSchema?.find { it.key == "baseUrl" }?.placeholder ?: "https://api.openai.com/v1") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-
-                // Model
-                OutlinedTextField(
-                    value = model,
-                    onValueChange = { model = it },
-                    label = { Text("模型") },
-                    placeholder = { Text(selectedType?.configSchema?.find { it.key == "model" }?.placeholder ?: "gpt-4o-mini") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
+                // 根据 configSchema 动态渲染所有字段
+                selectedType?.configSchema?.forEach { field ->
+                    DynamicConfigField(
+                        field = field,
+                        value = fieldValues[field.key] ?: "",
+                        onValueChange = { fieldValues[field.key] = it },
+                    )
+                }
 
                 // 创建后立即启用
                 Row(
@@ -584,13 +561,7 @@ private fun AddProviderDialog(
                             instanceId = instanceId,
                             providerId = providerId,
                             displayName = displayName.ifBlank { selectedType?.name ?: "Unnamed" },
-                            config = ProviderConfig(
-                                id = instanceId,
-                                name = displayName.ifBlank { selectedType?.name ?: "Unnamed" },
-                                apiKey = apiKey.takeIf { it.isNotBlank() },
-                                baseUrl = baseUrl.takeIf { it.isNotBlank() },
-                                model = model.takeIf { it.isNotBlank() },
-                            ),
+                            config = buildProviderConfig(instanceId, displayName, selectedType, fieldValues),
                             enabled = enableOnCreate,
                         )
                     )
@@ -615,10 +586,29 @@ private fun EditProviderDialog(
     onSave: (ProviderInstanceConfig) -> Unit,
 ) {
     var displayName by remember { mutableStateOf(info.displayName) }
-    var apiKey by remember { mutableStateOf(info.config.apiKey ?: "") }
-    var baseUrl by remember { mutableStateOf(info.config.baseUrl ?: "") }
-    var model by remember { mutableStateOf(info.config.model ?: "") }
-    var showApiKey by remember { mutableStateOf(false) }
+
+    // 从 config 中恢复所有字段值
+    val fieldValues = remember {
+        mutableStateMapOf<String, String>().apply {
+            info.config.apiKey?.let { put("apiKey", it) }
+            info.config.baseUrl?.let { put("baseUrl", it) }
+            info.config.model?.let { put("model", it) }
+            info.config.timeout?.let { put("timeout", it.toString()) }
+            info.config.proxy?.let { put("proxy", it) }
+            for ((k, v) in info.config.extra) { put(k, v) }
+        }
+    }
+
+    val schema = info.metadata?.configSchema ?: emptyList()
+
+    // 填充 schema 默认值（用于新增的字段）
+    LaunchedEffect(Unit) {
+        for (field in schema) {
+            if (!fieldValues.containsKey(field.key) && field.default != null) {
+                fieldValues[field.key] = field.default
+            }
+        }
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -645,37 +635,15 @@ private fun EditProviderDialog(
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
-                OutlinedTextField(
-                    value = apiKey,
-                    onValueChange = { apiKey = it },
-                    label = { Text("API Key") },
-                    placeholder = { Text("sk-...") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                    visualTransformation = if (showApiKey) VisualTransformation.None else PasswordVisualTransformation(),
-                    trailingIcon = {
-                        IconButton(onClick = { showApiKey = !showApiKey }) {
-                            Icon(
-                                if (showApiKey) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                                contentDescription = null,
-                            )
-                        }
-                    },
-                )
-                OutlinedTextField(
-                    value = baseUrl,
-                    onValueChange = { baseUrl = it },
-                    label = { Text("API Base URL") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                OutlinedTextField(
-                    value = model,
-                    onValueChange = { model = it },
-                    label = { Text("模型") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
+
+                // 根据 configSchema 动态渲染所有字段
+                schema.forEach { field ->
+                    DynamicConfigField(
+                        field = field,
+                        value = fieldValues[field.key] ?: "",
+                        onValueChange = { fieldValues[field.key] = it },
+                    )
+                }
             }
         },
         confirmButton = {
@@ -686,13 +654,7 @@ private fun EditProviderDialog(
                             instanceId = info.instanceId,
                             providerId = info.providerId,
                             displayName = displayName.ifBlank { info.displayName },
-                            config = ProviderConfig(
-                                id = info.config.id,
-                                name = displayName.ifBlank { info.displayName },
-                                apiKey = apiKey.takeIf { it.isNotBlank() },
-                                baseUrl = baseUrl.takeIf { it.isNotBlank() },
-                                model = model.takeIf { it.isNotBlank() },
-                            ),
+                            config = buildProviderConfig(info.instanceId, displayName.ifBlank { info.displayName }, info.metadata, fieldValues),
                             enabled = info.enabled,
                         )
                     )
@@ -719,19 +681,19 @@ private fun AddTtsProviderDialog(
     val availableTypes = remember { TTSProviderRegistry.getAll() }
     var selectedTypeIndex by remember { mutableIntStateOf(0) }
     var displayName by remember { mutableStateOf("") }
-    var apiKey by remember { mutableStateOf("") }
-    var baseUrl by remember { mutableStateOf("") }
-    var model by remember { mutableStateOf("") }
-    var showApiKey by remember { mutableStateOf(false) }
     var typeExpanded by remember { mutableStateOf(false) }
+
+    // 动态字段值
+    val fieldValues = remember { mutableStateMapOf<String, String>() }
 
     val selectedType = availableTypes.getOrNull(selectedTypeIndex)
     LaunchedEffect(selectedTypeIndex) {
+        fieldValues.clear()
         if (selectedType != null) {
             if (displayName.isBlank()) displayName = selectedType.name
-            val schema = selectedType.configSchema
-            baseUrl = schema.find { it.key == "baseUrl" }?.default ?: ""
-            model = schema.find { it.key == "model" }?.default ?: ""
+            for (field in selectedType.configSchema) {
+                field.default?.let { fieldValues[field.key] = it }
+            }
         }
     }
 
@@ -751,7 +713,7 @@ private fun AddTtsProviderDialog(
                         onValueChange = {},
                         readOnly = true,
                         trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(typeExpanded) },
-                        modifier = Modifier.fillMaxWidth().menuAnchor(),
+                        modifier = Modifier.fillMaxWidth().menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable),
                         singleLine = true,
                     )
                     ExposedDropdownMenu(expanded = typeExpanded, onDismissRequest = { typeExpanded = false }) {
@@ -783,43 +745,14 @@ private fun AddTtsProviderDialog(
                     modifier = Modifier.fillMaxWidth(),
                 )
 
-                // API Key
-                OutlinedTextField(
-                    value = apiKey,
-                    onValueChange = { apiKey = it },
-                    label = { Text("API Key") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                    visualTransformation = if (showApiKey) VisualTransformation.None else PasswordVisualTransformation(),
-                    trailingIcon = {
-                        IconButton(onClick = { showApiKey = !showApiKey }) {
-                            Icon(
-                                if (showApiKey) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                                contentDescription = null,
-                            )
-                        }
-                    },
-                )
-
-                // Base URL
-                OutlinedTextField(
-                    value = baseUrl,
-                    onValueChange = { baseUrl = it },
-                    label = { Text("API Base URL") },
-                    placeholder = { Text(selectedType?.configSchema?.find { it.key == "baseUrl" }?.placeholder ?: "") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-
-                // Model / Voice
-                OutlinedTextField(
-                    value = model,
-                    onValueChange = { model = it },
-                    label = { Text("模型 / 语音") },
-                    placeholder = { Text(selectedType?.configSchema?.find { it.key == "model" }?.placeholder ?: "") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
+                // 根据 configSchema 动态渲染所有字段
+                selectedType?.configSchema?.forEach { field ->
+                    DynamicConfigField(
+                        field = field,
+                        value = fieldValues[field.key] ?: "",
+                        onValueChange = { fieldValues[field.key] = it },
+                    )
+                }
             }
         },
         confirmButton = {
@@ -832,13 +765,7 @@ private fun AddTtsProviderDialog(
                             instanceId = instanceId,
                             providerId = providerId,
                             displayName = displayName.ifBlank { selectedType.name },
-                            config = ProviderConfig(
-                                id = instanceId,
-                                name = displayName.ifBlank { selectedType.name },
-                                apiKey = apiKey.takeIf { it.isNotBlank() },
-                                baseUrl = baseUrl.takeIf { it.isNotBlank() },
-                                model = model.takeIf { it.isNotBlank() },
-                            ),
+                            config = buildProviderConfig(instanceId, displayName.ifBlank { selectedType.name }, selectedType, fieldValues),
                             enabled = true,
                         ),
                     )
@@ -851,6 +778,362 @@ private fun AddTtsProviderDialog(
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("取消") }
         },
+    )
+}
+
+// ==================== TTS Provider 实例卡片 ====================
+
+@Composable
+private fun TtsProviderInstanceCard(
+    info: TTSProviderInstanceInfo,
+    onSetPrimary: () -> Unit,
+    onToggleEnabled: () -> Unit,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    val statusColor = when (info.status) {
+        ProviderStatus.CONNECTED -> MaterialTheme.colorScheme.primary
+        ProviderStatus.CONNECTING -> MaterialTheme.colorScheme.tertiary
+        ProviderStatus.ERROR -> MaterialTheme.colorScheme.error
+        ProviderStatus.IDLE -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    val statusText = when (info.status) {
+        ProviderStatus.CONNECTED -> "已连接"
+        ProviderStatus.CONNECTING -> "连接中..."
+        ProviderStatus.ERROR -> "错误"
+        ProviderStatus.IDLE -> "未连接"
+    }
+
+    Card(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = if (info.isPrimary)
+                MaterialTheme.colorScheme.primaryContainer
+            else
+                MaterialTheme.colorScheme.surfaceVariant,
+        ),
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(info.displayName, style = MaterialTheme.typography.titleSmall)
+                        if (info.isPrimary) {
+                            Spacer(Modifier.width(6.dp))
+                            Icon(
+                                Icons.Default.Star,
+                                contentDescription = "Primary",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(14.dp),
+                            )
+                        }
+                    }
+                    Text(
+                        "${info.metadata?.name ?: info.providerId} · ${info.config.extra["voiceId"]?.takeIf { it.isNotBlank() } ?: "默认音色"}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            Icons.Default.Circle,
+                            contentDescription = null,
+                            tint = statusColor,
+                            modifier = Modifier.size(8.dp),
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            statusText,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = statusColor,
+                        )
+                        if (info.error != null) {
+                            Spacer(Modifier.width(4.dp))
+                            Text(
+                                info.error,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.error,
+                                maxLines = 1,
+                            )
+                        }
+                    }
+                    // API Key 掩码
+                    val apiKeyDisplay = info.config.apiKey?.let { key ->
+                        if (key.isNotBlank()) "API Key: ****${key.takeLast(4)}" else "API Key: 未设置"
+                    } ?: "API Key: 未设置"
+                    Text(
+                        apiKeyDisplay,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (info.config.apiKey.isNullOrBlank())
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        else
+                            MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+
+                // 操作按钮
+                Column(horizontalAlignment = Alignment.End) {
+                    Row {
+                        if (!info.isPrimary) {
+                            IconButton(onClick = onSetPrimary) {
+                                Icon(Icons.Default.StarBorder, "设为主要", modifier = Modifier.size(18.dp))
+                            }
+                        }
+                        IconButton(onClick = onEdit) {
+                            Icon(Icons.Default.Edit, "编辑", modifier = Modifier.size(18.dp))
+                        }
+                        IconButton(onClick = onDelete) {
+                            Icon(
+                                Icons.Default.Delete, "删除",
+                                modifier = Modifier.size(18.dp),
+                                tint = MaterialTheme.colorScheme.error,
+                            )
+                        }
+                    }
+                    // 启用/禁用开关
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            if (info.enabled) "已启用" else "已禁用",
+                            style = MaterialTheme.typography.labelSmall,
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Switch(
+                            checked = info.enabled,
+                            onCheckedChange = { onToggleEnabled() },
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ==================== 编辑 TTS Provider 对话框 ====================
+
+@Composable
+private fun EditTtsProviderDialog(
+    info: TTSProviderInstanceInfo,
+    onDismiss: () -> Unit,
+    onSave: (TTSProviderInstanceConfig) -> Unit,
+) {
+    var displayName by remember { mutableStateOf(info.displayName) }
+
+    // 从 config 中恢复所有字段值
+    val fieldValues = remember {
+        mutableStateMapOf<String, String>().apply {
+            info.config.apiKey?.let { put("apiKey", it) }
+            info.config.baseUrl?.let { put("baseUrl", it) }
+            info.config.model?.let { put("model", it) }
+            info.config.timeout?.let { put("timeout", it.toString()) }
+            info.config.proxy?.let { put("proxy", it) }
+            for ((k, v) in info.config.extra) { put(k, v) }
+        }
+    }
+
+    val schema = info.metadata?.configSchema ?: emptyList()
+
+    // 填充 schema 默认值（用于新增的字段）
+    LaunchedEffect(Unit) {
+        for (field in schema) {
+            if (!fieldValues.containsKey(field.key) && field.default != null) {
+                fieldValues[field.key] = field.default
+            }
+        }
+    }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("编辑 TTS Provider") },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                // Provider 类型（不可修改）
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("类型: ", style = MaterialTheme.typography.labelMedium)
+                    Text(
+                        info.metadata?.name ?: info.providerId,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+
+                OutlinedTextField(
+                    value = displayName,
+                    onValueChange = { displayName = it },
+                    label = { Text("显示名称") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+
+                // 根据 configSchema 动态渲染所有字段
+                schema.forEach { field ->
+                    DynamicConfigField(
+                        field = field,
+                        value = fieldValues[field.key] ?: "",
+                        onValueChange = { fieldValues[field.key] = it },
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    onSave(
+                        TTSProviderInstanceConfig(
+                            instanceId = info.instanceId,
+                            providerId = info.providerId,
+                            displayName = displayName.ifBlank { info.displayName },
+                            config = buildProviderConfig(info.instanceId, displayName.ifBlank { info.displayName }, info.metadata, fieldValues),
+                            enabled = info.enabled,
+                        )
+                    )
+                },
+                enabled = displayName.isNotBlank(),
+            ) {
+                Text("保存")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("取消") }
+        },
+    )
+}
+
+// ==================== 动态配置字段 ====================
+
+/**
+ * 根据 ProviderConfigField.type 渲染对应的 UI 控件
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DynamicConfigField(
+    field: ProviderConfigField,
+    value: String,
+    onValueChange: (String) -> Unit,
+) {
+    when (field.type) {
+        "password" -> {
+            var visible by remember { mutableStateOf(false) }
+            OutlinedTextField(
+                value = value,
+                onValueChange = onValueChange,
+                label = { Text(field.label) },
+                placeholder = field.placeholder?.let { { Text(it) } },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+                visualTransformation = if (visible) VisualTransformation.None else PasswordVisualTransformation(),
+                trailingIcon = {
+                    IconButton(onClick = { visible = !visible }) {
+                        Icon(
+                            if (visible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                            contentDescription = null,
+                        )
+                    }
+                },
+            )
+        }
+
+        "boolean" -> {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(field.label, style = MaterialTheme.typography.bodyMedium)
+                Switch(
+                    checked = value.lowercase() == "true",
+                    onCheckedChange = { onValueChange(it.toString()) },
+                )
+            }
+        }
+
+        "select" -> {
+            var expanded by remember { mutableStateOf(false) }
+            Text(field.label, style = MaterialTheme.typography.labelMedium)
+            ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = it }) {
+                OutlinedTextField(
+                    value = value,
+                    onValueChange = {},
+                    readOnly = true,
+                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
+                    modifier = Modifier.fillMaxWidth().menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable),
+                    singleLine = true,
+                )
+                ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                    field.options?.forEach { opt ->
+                        DropdownMenuItem(
+                            text = { Text(opt) },
+                            onClick = {
+                                onValueChange(opt)
+                                expanded = false
+                            },
+                        )
+                    }
+                }
+            }
+        }
+
+        "number" -> {
+            OutlinedTextField(
+                value = value,
+                onValueChange = { newVal -> onValueChange(newVal.filter { it.isDigit() || it == '.' || it == '-' }) },
+                label = { Text(field.label) },
+                placeholder = field.placeholder?.let { { Text(it) } },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+
+        else -> {
+            // "string" 和其他未知类型
+            OutlinedTextField(
+                value = value,
+                onValueChange = onValueChange,
+                label = { Text(field.label) },
+                placeholder = field.placeholder?.let { { Text(it) } },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+    }
+
+    // 描述文本
+    field.description?.takeIf { it.isNotBlank() }?.let { desc ->
+        Text(desc, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+/**
+ * 从动态字段值构建 ProviderConfig
+ * 已知字段提取到 ProviderConfig 专用属性，其余放入 extra map
+ */
+private fun buildProviderConfig(
+    instanceId: String,
+    displayName: String,
+    metadata: ProviderMetadata?,
+    fieldValues: Map<String, String>,
+): ProviderConfig {
+    val knownKeys = setOf("apiKey", "baseUrl", "model", "timeout", "proxy")
+    val extra = mutableMapOf<String, String>()
+    for ((k, v) in fieldValues) {
+        if (k !in knownKeys && v.isNotBlank()) {
+            extra[k] = v
+        }
+    }
+    return ProviderConfig(
+        id = instanceId,
+        name = displayName,
+        apiKey = fieldValues["apiKey"]?.takeIf { it.isNotBlank() },
+        baseUrl = fieldValues["baseUrl"]?.takeIf { it.isNotBlank() },
+        model = fieldValues["model"]?.takeIf { it.isNotBlank() },
+        timeout = fieldValues["timeout"]?.toIntOrNull(),
+        proxy = fieldValues["proxy"]?.takeIf { it.isNotBlank() },
+        extra = extra,
     )
 }
 
@@ -1047,12 +1330,12 @@ private fun McpServerSection() {
                                     )
 
                                     // 工具数量标签
-                                    if (isConnected && (status?.toolCount ?: 0) > 0) {
+                                    if (isConnected && (status.toolCount ?: 0) > 0) {
                                         AssistChip(
                                             onClick = {},
                                             label = {
                                                 Text(
-                                                    "${status?.toolCount} ${I18nManager.t("agent.mcp.toolCount")}",
+                                                    "${status.toolCount} ${I18nManager.t("agent.mcp.toolCount")}",
                                                     style = MaterialTheme.typography.labelSmall,
                                                 )
                                             },
@@ -1884,7 +2167,7 @@ private fun PluginConfigDialog(
                                             readOnly = true,
                                             label = { Text(field.key) },
                                             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) },
-                                            modifier = Modifier.menuAnchor().fillMaxWidth(),
+                                            modifier = Modifier.menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable).fillMaxWidth(),
                                         )
                                         ExposedDropdownMenu(
                                             expanded = expanded,

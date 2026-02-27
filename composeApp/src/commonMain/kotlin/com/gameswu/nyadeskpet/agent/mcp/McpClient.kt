@@ -1,6 +1,7 @@
 package com.gameswu.nyadeskpet.agent.mcp
 
 import com.gameswu.nyadeskpet.currentTimeMillis
+import com.gameswu.nyadeskpet.util.DebugLog
 import io.ktor.client.*
 import io.ktor.client.request.*
 import io.ktor.client.statement.*
@@ -96,12 +97,12 @@ class McpClient(private val config: McpServerConfig) {
             _connected = true
             _error = null
             _lastConnectedAt = currentTimeMillis()
-            println("[McpClient] 已连接: ${config.name}, 发现 ${_tools.size} 个工具")
+            DebugLog.d("McpClient") { "已连接: ${config.name}, 发现 ${_tools.size} 个工具" }
 
         } catch (e: Exception) {
             _connected = false
             _error = e.message
-            println("[McpClient] 连接失败: ${config.name} - ${e.message}")
+            DebugLog.d("McpClient") { "连接失败: ${config.name} - ${e.message}" }
             throw e
         }
     }
@@ -119,7 +120,7 @@ class McpClient(private val config: McpServerConfig) {
             it.completeExceptionally(Exception("Disconnected"))
         }
         pendingRequests.clear()
-        println("[McpClient] 已断开: ${config.name}")
+        DebugLog.d("McpClient") { "已断开: ${config.name}" }
     }
 
     /**
@@ -132,7 +133,7 @@ class McpClient(private val config: McpServerConfig) {
         } catch (_: Exception) {
             if (!_connected) {
                 // 尝试重连
-                println("[McpClient] 工具调用失败，尝试重连: ${config.name}")
+                DebugLog.d("McpClient") { "工具调用失败，尝试重连: ${config.name}" }
                 try {
                     disconnect()
                     connect()
@@ -242,7 +243,7 @@ class McpClient(private val config: McpServerConfig) {
             } catch (e: Exception) {
                 _connected = false
                 _error = "SSE stream error: ${e.message}"
-                println("[McpClient] SSE 流错误: ${config.name} - ${e.message}")
+                DebugLog.d("McpClient") { "SSE 流错误: ${config.name} - ${e.message}" }
             }
         }
     }
@@ -257,7 +258,7 @@ class McpClient(private val config: McpServerConfig) {
             "endpoint" -> {
                 // data 内容是相对或绝对 URL 路径
                 messageEndpoint = resolveEndpoint(data)
-                println("[McpClient] 获取到消息端点: $messageEndpoint")
+                DebugLog.d("McpClient") { "获取到消息端点: $messageEndpoint" }
             }
             "message" -> {
                 try {
@@ -267,7 +268,7 @@ class McpClient(private val config: McpServerConfig) {
                         pendingRequests.remove(id)?.complete(response)
                     }
                 } catch (e: Exception) {
-                    println("[McpClient] 解析 JSON-RPC 响应失败: ${e.message}")
+                    DebugLog.d("McpClient") { "解析 JSON-RPC 响应失败: ${e.message}" }
                 }
             }
         }

@@ -27,8 +27,6 @@ object PluginCapability {
 
     // 前端能力
     const val PANEL = "panel"
-    const val WIDGET = "widget"
-    const val THEME = "theme"
 }
 
 // =====================================================================
@@ -90,8 +88,6 @@ data class PluginManifest(
     val dependencies: List<String> = emptyList(),
     /** 是否自动激活 */
     val autoActivate: Boolean = true,
-    /** 是否作为 handlerPlugin（拦截核心消息处理流程） */
-    val handlerPlugin: Boolean = false,
 )
 
 /**

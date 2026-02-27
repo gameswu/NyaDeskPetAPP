@@ -60,7 +60,11 @@ internal data class ElevenLabsVoice(
 
 class ElevenLabsProvider(config: ProviderConfig) : TTSProvider(config) {
 
-    private val httpClient = HttpClient { expectSuccess = false }
+    companion object {
+        private const val BASE_URL = "https://api.elevenlabs.io/v1"
+    }
+
+    private val httpClient = buildHttpClient()
     private var cachedVoices: List<VoiceInfo> = emptyList()
 
     private val json = Json {
@@ -106,7 +110,7 @@ class ElevenLabsProvider(config: ProviderConfig) : TTSProvider(config) {
             else -> "mp3_44100_128"
         }
 
-        val response = httpClient.post("https://api.elevenlabs.io/v1/text-to-speech/$voiceId") {
+        val response = httpClient.post("$BASE_URL/text-to-speech/$voiceId") {
             apiKey?.let { header("xi-api-key", it) }
             contentType(ContentType.Application.Json)
             parameter("output_format", outputFormat)
@@ -125,12 +129,7 @@ class ElevenLabsProvider(config: ProviderConfig) : TTSProvider(config) {
         val audioBytes = response.readRawBytes()
         val audioBase64 = Base64.encode(audioBytes)
 
-        val mimeType = when (format) {
-            "mp3" -> "audio/mpeg"
-            "pcm" -> "audio/pcm"
-            "opus" -> "audio/opus"
-            else -> "audio/mpeg"
-        }
+        val mimeType = audioFormatToMimeType(format)
 
         return TTSResponse(audioBase64 = audioBase64, mimeType = mimeType)
     }
@@ -140,7 +139,7 @@ class ElevenLabsProvider(config: ProviderConfig) : TTSProvider(config) {
 
         val apiKey = getConfigValue<String?>("apiKey", null)
 
-        val response = httpClient.get("https://api.elevenlabs.io/v1/voices") {
+        val response = httpClient.get("$BASE_URL/voices") {
             apiKey?.let { header("xi-api-key", it) }
         }
 
@@ -165,7 +164,7 @@ class ElevenLabsProvider(config: ProviderConfig) : TTSProvider(config) {
         return try {
             if (!initialized) initialize()
             val apiKey = getConfigValue<String?>("apiKey", null)
-            val resp = httpClient.get("https://api.elevenlabs.io/v1/voices") {
+            val resp = httpClient.get("$BASE_URL/voices") {
                 apiKey?.let { header("xi-api-key", it) }
             }
             if (resp.status.value == 401) {

@@ -3,6 +3,7 @@ package com.gameswu.nyadeskpet.agent
 import com.gameswu.nyadeskpet.agent.provider.LLMRequest
 import com.gameswu.nyadeskpet.agent.provider.LLMResponse
 import com.gameswu.nyadeskpet.data.extractZipEntries
+import com.gameswu.nyadeskpet.util.DebugLog
 import com.gameswu.nyadeskpet.plugin.api.ToolDefinition
 import com.gameswu.nyadeskpet.plugin.api.ToolResult
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -110,7 +111,7 @@ class SkillManager {
      */
     fun register(schema: SkillSchema, handler: SkillHandler, source: String = "builtin") {
         if (skills.containsKey(schema.name)) {
-            println("[SkillManager] 技能已存在，将覆盖: ${schema.name}")
+            DebugLog.d("SkillManager") { "技能已存在，将覆盖: ${schema.name}" }
         }
 
         skills[schema.name] = SkillDefinition(
@@ -120,7 +121,7 @@ class SkillManager {
             enabled = true,
         )
 
-        println("[SkillManager] 注册技能: ${schema.name} (${schema.category}) [$source]")
+        DebugLog.d("SkillManager") { "注册技能: ${schema.name} (${schema.category}) [$source]" }
         notifyChange()
     }
 
@@ -130,23 +131,10 @@ class SkillManager {
     fun unregister(name: String): Boolean {
         val deleted = skills.remove(name) != null
         if (deleted) {
-            println("[SkillManager] 注销技能: $name")
+            DebugLog.d("SkillManager") { "注销技能: $name" }
             notifyChange()
         }
         return deleted
-    }
-
-    /**
-     * 注销指定来源的所有技能
-     */
-    fun unregisterBySource(source: String): Int {
-        val toRemove = skills.entries.filter { it.value.source == source }.map { it.key }
-        toRemove.forEach { skills.remove(it) }
-        if (toRemove.isNotEmpty()) {
-            println("[SkillManager] 注销来源 $source 的 ${toRemove.size} 个技能")
-            notifyChange()
-        }
-        return toRemove.size
     }
 
     // ==================== 调用 ====================
@@ -161,17 +149,17 @@ class SkillManager {
             return SkillResult(success = false, output = "技能已禁用: $name")
         }
 
-        println("[SkillManager] 调用技能: $name")
+        DebugLog.d("SkillManager") { "调用技能: $name" }
         val startTime = com.gameswu.nyadeskpet.currentTimeMillis()
 
         return try {
             val result = def.handler(params, ctx)
             val elapsed = com.gameswu.nyadeskpet.currentTimeMillis() - startTime
-            println("[SkillManager] 技能 $name 执行完成 (${elapsed}ms) success=${result.success}")
+            DebugLog.d("SkillManager") { "技能 $name 执行完成 (${elapsed}ms) success=${result.success}" }
             result
         } catch (e: Exception) {
             val elapsed = com.gameswu.nyadeskpet.currentTimeMillis() - startTime
-            println("[SkillManager] 技能 $name 执行失败 (${elapsed}ms): ${e.message}")
+            DebugLog.e("SkillManager") { "技能 $name 执行失败 (${elapsed}ms): ${e.message}" }
             SkillResult(success = false, output = "技能执行异常: ${e.message}")
         }
     }
@@ -193,19 +181,15 @@ class SkillManager {
         }
     }
 
-    fun getSchema(name: String): SkillSchema? = skills[name]?.schema
-
     fun has(name: String): Boolean = skills.containsKey(name)
 
     fun setEnabled(name: String, enabled: Boolean): Boolean {
         val def = skills[name] ?: return false
         def.enabled = enabled
-        println("[SkillManager] 技能 $name ${if (enabled) "已启用" else "已禁用"}")
+        DebugLog.d("SkillManager") { "技能 $name ${if (enabled) "已启用" else "已禁用"}" }
         notifyChange()
         return true
     }
-
-    fun getEnabledCount(): Int = skills.values.count { it.enabled }
 
     // ==================== Tool 兼容层 ====================
 

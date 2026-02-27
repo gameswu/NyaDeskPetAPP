@@ -4,22 +4,12 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
 
 /**
- * 对话气泡附件
- */
-data class DialogueAttachment(
-    val type: String,   // "image" | "file"
-    val url: String,
-    val name: String? = null,
-)
-
-/**
  * 对话气泡状态
  */
 data class DialogueState(
     val visible: Boolean = false,
     val text: String = "",
     val progress: Float = 1f,
-    val attachment: DialogueAttachment? = null,
 )
 
 /**
@@ -46,12 +36,11 @@ class DialogueManager {
         text: String,
         durationMs: Long = 5000L,
         typewriter: Boolean = true,
-        attachment: DialogueAttachment? = null,
     ) {
         clearJobs()
 
         if (typewriter && text.isNotEmpty()) {
-            _state.value = DialogueState(visible = true, text = "", progress = 1f, attachment = attachment)
+            _state.value = DialogueState(visible = true, text = "", progress = 1f)
             typewriterJob = scope.launch {
                 val speed = when {
                     text.length > 50 -> 50L
@@ -66,7 +55,7 @@ class DialogueManager {
                 if (durationMs > 0) startAutoHide(durationMs)
             }
         } else {
-            _state.value = DialogueState(visible = true, text = text, progress = 1f, attachment = attachment)
+            _state.value = DialogueState(visible = true, text = text, progress = 1f)
             if (durationMs > 0) startAutoHide(durationMs)
         }
     }
@@ -101,11 +90,6 @@ class DialogueManager {
     fun hide() {
         clearJobs()
         _state.value = DialogueState()
-    }
-
-    fun appendAndAutoHide(text: String, durationMs: Long) {
-        appendText(text)
-        startAutoHide(durationMs)
     }
 
     private fun clearJobs() {

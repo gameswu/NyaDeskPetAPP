@@ -38,9 +38,3 @@ interface PanelPlugin {
     val panelTitle: String
     fun getPanelDescription(): String
 }
-
-interface WidgetPlugin {
-    val widgetId: String
-    val widgetName: String
-    fun getWidgetDescription(): String
-}

@@ -75,6 +75,7 @@
 				C820ECD469E74C1A8432DD8F /* Sources */,
 				26E06EC0BE7273113B07CCF1 /* Frameworks */,
 				BDB909BCE2D8EEB273C0FD83 /* Resources */,
+				A1B2C3D4E5F6A7B8C9D0E1F2 /* Copy Models */,
 			);
 			buildRules = (
 			);
@@ -135,6 +136,24 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
+		A1B2C3D4E5F6A7B8C9D0E1F2 /* Copy Models */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Copy Models";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "MODELS_SRC=\"${SRCROOT}/../composeApp/src/androidMain/assets/models\"\nMODELS_DST=\"${BUILT_PRODUCTS_DIR}/${PRODUCT_NAME}.app/models\"\nif [ -d \"$MODELS_SRC\" ]; then\n  echo \"Copying models to app bundle...\"\n  rm -rf \"$MODELS_DST\"\n  mkdir -p \"$MODELS_DST\"\n  cp -R \"$MODELS_SRC/\" \"$MODELS_DST/\"\n  # Remove any stale symlinks\n  find \"$MODELS_DST\" -type l -delete 2>/dev/null || true\n  echo \"Models copied successfully\"\nelse\n  echo \"warning: Models source not found at $MODELS_SRC\"\nfi\n";
+		};
 		982312898DB46D479C2497BA /* Compile Kotlin Framework */ = {
 			isa = PBXShellScriptBuildPhase;
 			alwaysOutOfDate = 1;

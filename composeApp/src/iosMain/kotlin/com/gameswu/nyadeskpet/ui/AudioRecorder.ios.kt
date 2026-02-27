@@ -1,5 +1,8 @@
+@file:OptIn(kotlinx.cinterop.ExperimentalForeignApi::class, kotlinx.cinterop.BetaInteropApi::class)
+
 package com.gameswu.nyadeskpet.ui
 
+import kotlinx.cinterop.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -52,7 +55,7 @@ actual class AudioRecorder actual constructor() {
             )
 
             // 安装 format converter
-            val converter = AVAudioConverter(fromFormat = nativeFormat, toFormat = targetFormat!!)
+            val converter = AVAudioConverter(fromFormat = nativeFormat, toFormat = targetFormat)
 
             pcmBuffers.clear()
 
@@ -67,11 +70,11 @@ actual class AudioRecorder actual constructor() {
                 val convertedBuffer = AVAudioPCMBuffer(
                     pCMFormat = targetFormat,
                     frameCapacity = 4096u
-                ) ?: return@installTapOnBus
+                )
 
                 try {
                     var error: kotlinx.cinterop.ObjCObjectVar<platform.Foundation.NSError?>? = null
-                    converter?.convertToBuffer(
+                    converter.convertToBuffer(
                         outputBuffer = convertedBuffer,
                         error = null,
                         withInputFromBlock = { _, outStatus ->

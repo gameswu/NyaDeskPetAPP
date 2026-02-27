@@ -9,11 +9,8 @@ import org.koin.compose.koinInject
 
 // 品牌色 — 与原项目一致的 Material Green 体系
 private val Green500 = Color(0xFF4CAF50)
-private val Green600 = Color(0xFF43A047)
-private val Green700 = Color(0xFF388E3C)
 private val Green800 = Color(0xFF2E7D32)
 private val GreenLight = Color(0xFF8BC34A)
-private val GreenDark = Color(0xFF1B5E20)
 private val GreenContainer = Color(0xFFC8E6C9)
 private val OnGreenContainer = Color(0xFF1B5E20)
 

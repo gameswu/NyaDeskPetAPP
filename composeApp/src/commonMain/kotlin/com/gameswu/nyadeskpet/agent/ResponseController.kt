@@ -34,14 +34,6 @@ class ResponseController {
         }
     }
 
-    fun isActive(responseId: String): Boolean {
-        return currentSession?.responseId == responseId
-    }
-
-    fun isDiscarded(responseId: String): Boolean {
-        return responseId in discardedIds
-    }
-
     fun markAudioActive() {
         currentSession?.hasActiveAudio = true
     }
@@ -52,8 +44,6 @@ class ResponseController {
         }
         discardedIds.remove(responseId)
     }
-
-    fun getCurrentSession(): ResponseSession? = currentSession
 
     /**
      * 中断当前回复：停止音频播放、清除对话气泡

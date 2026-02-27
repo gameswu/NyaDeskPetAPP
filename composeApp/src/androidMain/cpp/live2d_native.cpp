@@ -117,9 +117,6 @@ struct PosePartInfo {
 static std::vector<std::vector<PosePartInfo>> g_poseGroups;
 static bool g_hasPose = false;
 static const float POSE_FADE_SPEED = 5.0f; // opacity change per second
-static const float POSE_EPSILON = 0.001f;
-static const float POSE_PHI = 0.5f;  // threshold for switching dominant part
-static const float POSE_BACKOPACITY_MIN = 0.15f; // minimum opacity for non-visible parts
 
 // ===================== Physics =====================
 

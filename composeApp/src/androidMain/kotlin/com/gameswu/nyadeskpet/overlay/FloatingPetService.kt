@@ -44,6 +44,10 @@ class FloatingPetService : Service() {
         /** 悬浮窗默认尺寸 (dp) */
         private const val DEFAULT_SIZE_DP = 200
 
+        /** 悬浮窗默认初始位置 (px) */
+        private const val DEFAULT_WINDOW_X = 100
+        private const val DEFAULT_WINDOW_Y = 200
+
         fun start(context: Context) {
             if (_isRunning.value) {
                 Log.w(TAG, "Service already running, ignoring start")
@@ -82,8 +86,8 @@ class FloatingPetService : Service() {
     private val gazeController = GazeController()
 
     // 悬浮窗位置状态
-    private var windowX = 100
-    private var windowY = 200
+    private var windowX = DEFAULT_WINDOW_X
+    private var windowY = DEFAULT_WINDOW_Y
 
     override fun onBind(intent: Intent?): IBinder? = null
 

@@ -15,7 +15,6 @@ import kotlinx.serialization.json.Json
  */
 class UpdateChecker {
 
-    private val httpClient = HttpClient { expectSuccess = false }
     private val json = Json { ignoreUnknownKeys = true }
 
     @Serializable
@@ -43,6 +42,7 @@ class UpdateChecker {
      */
     suspend fun checkForUpdate(updateSource: String): UpdateResult {
         val currentVersion = getAppVersion()
+        val httpClient = HttpClient { expectSuccess = false }
 
         try {
             // 解析 owner/repo
@@ -102,11 +102,9 @@ class UpdateChecker {
                 publishedAt = "",
                 error = "检查更新失败: ${e.message}"
             )
+        } finally {
+            httpClient.close()
         }
-    }
-
-    fun close() {
-        httpClient.close()
     }
 
     companion object {

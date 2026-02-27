@@ -20,6 +20,10 @@ import kotlinx.serialization.json.*
  */
 class WebToolsPlugin : Plugin, ToolProvider {
 
+    companion object {
+        private const val USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+    }
+
     override val manifest = PluginManifest(
         id = "builtin.web-tools",
         name = "网络工具",
@@ -163,7 +167,7 @@ class WebToolsPlugin : Plugin, ToolProvider {
             val response = withTimeout(requestTimeout) {
                 httpClient.get(url) {
                     headers {
-                        append(HttpHeaders.UserAgent, "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+                        append(HttpHeaders.UserAgent, USER_AGENT)
                         append(HttpHeaders.Accept, "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
                         append(HttpHeaders.AcceptLanguage, "zh-CN,zh;q=0.9,en;q=0.8")
                     }
@@ -257,7 +261,7 @@ class WebToolsPlugin : Plugin, ToolProvider {
         val response = withTimeout(requestTimeout) {
             httpClient.get(url) {
                 headers {
-                    append(HttpHeaders.UserAgent, "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
+                    append(HttpHeaders.UserAgent, USER_AGENT)
                     append(HttpHeaders.Accept, "text/html,application/xhtml+xml")
                     append(HttpHeaders.AcceptLanguage, "zh-CN,zh;q=0.9,en;q=0.8")
                 }

@@ -1,8 +1,6 @@
 package com.gameswu.nyadeskpet.ui
 
 import androidx.compose.runtime.*
-import com.gameswu.nyadeskpet.agent.asr.*
-import kotlinx.coroutines.launch
 
 /**
  * 语音输入控制器状态。
@@ -35,26 +33,25 @@ expect fun rememberVoiceInput(
 ): VoiceInputController
 
 /**
- * 双模式语音输入 — 根据 asrMode 自动切换系统识别器或 Whisper API
+ * 双模式语音输入 — 支持本地模型 ASR
  *
- * - "system": 使用平台原生语音识别（SpeechRecognizer / SFSpeechRecognizer）
- * - "whisper": 使用 AudioRecorder 录音 + Whisper API 识别
+ * - "local": 使用本地 ASR 模型（如 GGML / ONNX Whisper 模型）
+ *   当本地模型未导入时，回退到平台原生语音识别作为临时实现
  *
  * 返回统一的 VoiceInputController 接口，上层无需关心具体实现
  */
 @Composable
 fun rememberDualModeVoiceInput(
     asrMode: String,
-    asrApiKey: String,
-    asrBaseUrl: String,
-    asrModel: String,
+    asrModelPath: String,
     asrLanguage: String,
     onResult: (String) -> Unit,
     onPartialResult: (String) -> Unit = {},
     onError: (String) -> Unit = {},
     locale: String = "",
 ): VoiceInputController {
-    // 系统模式 — 走原有平台识别器
+    // 本地模式 — 当前回退到平台原生识别器
+    // TODO: 当 asrModelPath 不为空时，使用本地 Whisper 推理（sherpa-onnx / whisper.cpp）
     val systemVoiceInput = rememberVoiceInput(
         onResult = onResult,
         onPartialResult = onPartialResult,
@@ -62,67 +59,6 @@ fun rememberDualModeVoiceInput(
         locale = locale,
     )
 
-    // Whisper 模式状态
-    var whisperListening by remember { mutableStateOf(false) }
-    val recorder = remember { AudioRecorder() }
-    val scope = rememberCoroutineScope()
-
-    DisposableEffect(Unit) {
-        onDispose {
-            recorder.release()
-        }
-    }
-
-    // 如果当前是系统模式，直接返回系统控制器
-    if (asrMode != "whisper") {
-        return systemVoiceInput
-    }
-
-    // Whisper 模式控制器
-    return VoiceInputController(
-        isAvailable = true,
-        isListening = whisperListening,
-        startListening = {
-            if (!whisperListening) {
-                val started = recorder.startRecording()
-                if (started) {
-                    whisperListening = true
-                } else {
-                    onError("无法启动录音")
-                }
-            }
-        },
-        stopListening = {
-            if (whisperListening) {
-                whisperListening = false
-                val wavData = recorder.stopRecording()
-                if (wavData == null || wavData.size <= 44) {
-                    onError("录音数据为空")
-                    return@VoiceInputController
-                }
-
-                // 异步调用 Whisper API
-                scope.launch {
-                    try {
-                        val config = ASRProviderConfig(
-                            apiKey = asrApiKey.ifBlank { null },
-                            baseUrl = asrBaseUrl.ifBlank { null },
-                            model = asrModel.ifBlank { null },
-                            language = asrLanguage.ifBlank { null },
-                        )
-                        val provider = WhisperASRProvider(config)
-                        val result = provider.recognize(wavData, asrLanguage.ifBlank { null })
-                        if (result != null && result.text.isNotBlank()) {
-                            onResult(result.text)
-                        } else {
-                            onError("Whisper 未识别到文本")
-                        }
-                    } catch (e: Exception) {
-                        onError("Whisper 识别失败: ${e.message}")
-                    }
-                }
-            }
-        },
-    )
+    return systemVoiceInput
 }
 
